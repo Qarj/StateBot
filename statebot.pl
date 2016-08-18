@@ -52,7 +52,7 @@ my ($retry, $retries, $globalretries, $retry_passed_count, $retry_failed_count, 
 my ($sanity_result); ## if a sanity check fails, execution will stop (as soon as all retries are exhausted on the current test case)
 my ($start_time); ## to store a copy of $start_run_timer in a global variable
 my ($output, $output_folder, $output_prefix); ## output path including possible filename prefix, output path without filename prefix, output prefix only
-my ($outsum); ## outsum is a checksum calculated on the output directory name. Used to help guarantee test data uniqueness where two WebInject processes are running in parallel.
+my ($outsum); ## outsum is a checksum calculated on the output directory name. Used to help guarantee test data uniqueness where two StateBot processes are running in parallel.
 my ($user_config); ## support arbirtary user defined config
 my ($convert_back_ports, $convert_back_ports_null); ## turn {:4040} into :4040 or null
 my $total_assertion_skips = 0;
@@ -128,7 +128,7 @@ $current_case_filename = basename($current_case_file); ## with extension
 $testfilename = fileparse($current_case_file, '.xml'); ## without extension
 
 read_test_case_file();
-#start_session(); #starts, or restarts the webinject session
+#start_session(); #starts, or restarts the statebot session
 
 $repeat = $xml_test_cases->{repeat};  #grab the number of times to iterate test case file
 if (!$repeat) { $repeat = 1; }  #set to 1 in case it is not defined in test case file
@@ -648,13 +648,13 @@ sub update_latency_statistics {
 #------------------------------------------------------------------
 sub restart_browser {
 
-    if ($case{restartbrowseronfail} && ($is_failure > 0)) { ## restart the Selenium browser session and also the WebInject session
+    if ($case{restartbrowseronfail} && ($is_failure > 0)) { ## restart the Selenium browser session and also the StateBot session
         $results_stdout .= qq|RESTARTING SESSION DUE TO FAIL ... \n|;
         if ($opt_driver) { start_selenium_browser(); }
         start_session();
     }
 
-    if ($case{restartbrowser}) { ## restart the Selenium browser session and also the WebInject session
+    if ($case{restartbrowser}) { ## restart the Selenium browser session and also the StateBot session
         $results_stdout .= qq|RESTARTING BROWSER ... \n|;
         if ($opt_driver) {
                 $results_stdout .= "RESTARTING SESSION ...\n";
@@ -700,7 +700,7 @@ sub write_initial_html {  #write opening tags for results file
 
     $results_html .= qq|<html xmlns="http://www.w3.org/1999/xhtml">\n|;
     $results_html .= qq|<head>\n|;
-    $results_html .= qq|    <title>WebInject Test Results</title>\n|;
+    $results_html .= qq|    <title>StateBot Test Results</title>\n|;
     $results_html .= qq|    <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />\n|;
     $results_html .= qq|    <style type="text/css">\n|;
     $results_html .= qq|        body {\n|;
@@ -746,7 +746,7 @@ sub write_initial_xml {  #write opening tags for results file
     $_results_xml .= '<?xml-stylesheet type="text/xsl" href="../../../../../../../content/Results.xsl"?>'."\n";
     $_results_xml .= "<results>\n\n";
     $results_xml_file_name = 'results.xml';
-    if ( defined $user_config->{wif}->{dd} && defined $user_config->{wif}->{run_number} ) { # presume if this info is present, webinject.pl has been called by wif.pl
+    if ( defined $user_config->{wif}->{dd} && defined $user_config->{wif}->{run_number} ) { # presume if this info is present, statebot.pl has been called by wif.pl
         $results_xml_file_name = 'results_'.$user_config->{wif}->{run_number}.'.xml';
         $_results_xml .= "    <wif>\n";
         $_results_xml .= "        <environment>$user_config->{wif}->{environment}</environment>\n";
@@ -791,7 +791,7 @@ sub _write_html {
 sub write_initial_stdout {  #write initial text for STDOUT
 
     $results_stdout .= "\n";
-    $results_stdout .= "Starting WebInject Engine...\n\n";
+    $results_stdout .= "Starting StateBot Engine...\n\n";
 
     return;
 }
@@ -901,15 +901,15 @@ sub write_final_stdout {  #write summary and closing text for STDOUT
 	    my $_end = defined $user_config->{globaltimeout} ? "$user_config->{globaltimeout};;0" : ';;0';
 
             if ($case_failed_count > 0) {
-	        print "WebInject CRITICAL - $return_message |time=$total_response;$_end\n";
+	        print "StateBot CRITICAL - $return_message |time=$total_response;$_end\n";
                 exit $_exit_codes{'CRITICAL'};
             }
             elsif ( ($user_config->{globaltimeout}) && ($total_response > $user_config->{globaltimeout}) ) {
-                print "WebInject WARNING - All tests passed successfully but global timeout ($user_config->{globaltimeout} seconds) has been reached |time=$total_response;$_end\n";
+                print "StateBot WARNING - All tests passed successfully but global timeout ($user_config->{globaltimeout} seconds) has been reached |time=$total_response;$_end\n";
                 exit $_exit_codes{'WARNING'};
             }
             else {
-                print "WebInject OK - All tests passed successfully in $total_response seconds |time=$total_response;$_end\n";
+                print "StateBot OK - All tests passed successfully in $total_response seconds |time=$total_response;$_end\n";
                 exit $_exit_codes{'OK'};
             }
         }
@@ -2752,7 +2752,7 @@ sub read_test_case_file {
                [^>]*>
                }{_include_file($2,$1,$&)}gsex;          # the actual file content
 
-    # for convenience, WebInject allows ampersand and less than to appear in xml data, so this needs to be masked
+    # for convenience, StateBot allows ampersand and less than to appear in xml data, so this needs to be masked
     $_xml =~ s/&/{AMPERSAND}/g;
     while ( $_xml =~ s/\w\s*=\s*"[^"]*\K<(?!case)([^"]*")/{LESSTHAN}$1/sg ) {}
     while ( $_xml =~ s/\w\s*=\s*'[^']*\K<(?!case)([^']*')/{LESSTHAN}$1/sg ) {}
@@ -2843,7 +2843,7 @@ sub convert_back_xml {  #converts replaced xml with substitutions
     $_[0] =~ s/{JUMPBACKS}/$jumpbacks/g; #Number of times we have jumped back due to failure
 
 ## hostname, testnum, concurrency, teststeptime
-    $_[0] =~ s/{HOSTNAME}/$hostname/g; #of the computer currently running webinject
+    $_[0] =~ s/{HOSTNAME}/$hostname/g; #of the computer currently running statebot
     $_[0] =~ s/{TESTNUM}/$testnum_display/g;
     $_[0] =~ s/{TESTFILENAME}/$testfilename/g;
     $_[0] =~ s/{LENGTH}/$_my_length/g; #length of the previous test step response
@@ -3439,10 +3439,10 @@ sub _determine_absolute_url {
     my $_ur_url = URI::URL->new($_ref, $_response_base);
     my $_abs_url = $_ur_url->abs;
 
-    # we must return a url beginning with http (or javascript), otherwise WebInject will get stuck in an infinite loop
+    # we must return a url beginning with http (or javascript), otherwise StateBot will get stuck in an infinite loop
     # if the url we are processing begins with something like android-app://, URI:URL will not turn it into a http url - better just to get rid of it
     if ( (substr $_abs_url, 0, 1) ne 'h') {
-        $_abs_url = 'http://webinject_could_not_determine_absolute_url';
+        $_abs_url = 'http://statebot_could_not_determine_absolute_url';
     }
 
     return $_abs_url;
@@ -3582,7 +3582,7 @@ sub start_selenium_browser {     ## start Browser using Selenium Server or Chrom
 
     if ($@) {
         print "\nError: $@ Failed to connect on port $opt_port after $_max tries\n\n";
-        die "WebInject Aborted - could not connect to Selenium Server\n";
+        die "StateBot Aborted - could not connect to Selenium Server\n";
     }
 
     eval { $driver->set_timeout('page load', 30_000); };
@@ -3642,7 +3642,7 @@ sub shutdown_selenium {
     return;
 }
 #------------------------------------------------------------------
-sub start_session {     ## creates the webinject user agent
+sub start_session {     ## creates the statebot user agent
 
     require IO::Socket::SSL;
     #require Crypt::SSLeay;  #for SSL/HTTPS (you may comment this out if you don't need it)
@@ -3651,7 +3651,7 @@ sub start_session {     ## creates the webinject user agent
     #$useragent = LWP::UserAgent->new; ## 1.41 version
     $useragent = LWP::UserAgent->new(keep_alive=>1);
     $cookie_jar = HTTP::Cookies->new;
-    $useragent->agent('WebInject');  ## http useragent that will show up in webserver logs
+    $useragent->agent('StateBot');  ## http useragent that will show up in webserver logs
     #$useragent->timeout(200); ## it is possible to override the default timeout of 360 seconds
     $useragent->max_redirect('0');  #don't follow redirects for GET's (POST's already don't follow, by default)
     eval
@@ -3762,7 +3762,7 @@ sub get_options {  #shell options
 }
 
 sub print_version {
-    print "\nWebInject version $VERSION\nFor more info: https://github.com/Qarj/WebInject\n\n";
+    print "\nStateBot version $VERSION\nFor more info: https://github.com/Qarj/StateBot\n\n";
 
     return;
 }
@@ -3785,8 +3785,8 @@ Usage: statebot.pl testcase_file <<options>>
 
 or
 
-webinject.pl --version|-v
-webinject.pl --help|-h
+statebot.pl --version|-v
+statebot.pl --help|-h
 EOB
     ;
 
