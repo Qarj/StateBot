@@ -8,24 +8,9 @@ use strict;
 use warnings;
 use vars qw/ $VERSION /;
 
-$VERSION = '2.0.0';
+$VERSION = '0.1.0';
 
-#removed the -w parameter from the first line so that warnings will not be displayed for code in the packages
-
-#    Copyright 2004-2006 Corey Goldberg (corey@goldb.org)
-#    Extensive updates 2015-2016 Tim Buckland
-#
-#    This file is part of WebInject.
-#
-#    WebInject is free software; you can redistribute it and/or modify
-#    it under the terms of the GNU General Public License as published by
-#    the Free Software Foundation; either version 2 of the License, or
-#    (at your option) any later version.
-#
-#    WebInject is distributed in the hope that it will be useful,
-#    but without any warranty; without even the implied warranty of
-#    merchantability or fitness for a particular purpose.  See the
-#    GNU General Public License for more details.
+#    StateBot is an experiment based upon the WebInject 2 code base
 
 use File::Basename;
 use File::Spec;
@@ -56,7 +41,7 @@ my ($current_case_file, $current_case_filename, $case_count, $is_failure, $fast_
 my (%case, %case_save);
 my (%config);
 my ($current_date_time, $total_run_time, $start_timer, $end_timer);
-my ($opt_configfile, $opt_version, $opt_output, $opt_autocontroller, $opt_port, $opt_proxy);
+my ($opt_configfile, $opt_version, $opt_output, $opt_port, $opt_proxy);
 my ($opt_driver, $opt_proxyrules, $opt_ignoreretry, $opt_no_output, $opt_verbose, $opt_help, $opt_chromedriver_binary, $opt_publish_full);
 
 my ($report_type); ## 'standard' and 'nagios' supported
@@ -325,16 +310,6 @@ sub get_test_step_skip_message {
         }
         else {
             return "do not run on $case{donotrunon}";
-        }
-    }
-
-    $case{autocontrolleronly} = $xml_test_cases->{case}->{$testnum}->{autocontrolleronly}; ## only run this test case on the automation controller, e.g. test case may involve a test virus which cannot be run on a regular corporate desktop
-    if ($case{autocontrolleronly}) { ## is the autocontrolleronly value set for this testcase?
-        if ($opt_autocontroller) { ## if so, was the auto controller option specified?
-            ## run this test case as normal since it is allowed
-        }
-        else {
-              return 'This is not the automation controller';
         }
     }
 
@@ -2683,7 +2658,7 @@ sub process_case_file {  #get test case files to run (from command line or confi
     }
 
     #grab values for constants in config file:
-    for my $_config_const (qw/baseurl baseurl1 baseurl2 proxy timeout globalretry globaljumpbacks autocontrolleronly/) {
+    for my $_config_const (qw/baseurl baseurl1 baseurl2 proxy timeout globalretry globaljumpbacks/) {
         if ($user_config->{$_config_const}) {
             $config{$_config_const} = $user_config->{$_config_const};
             #print "\n$_ : $config{$_} \n\n";
@@ -2838,13 +2813,6 @@ sub _include_file {
     if ( $_match =~ /runon[\s]*=[\s]*"([^"]*)/ ) {
         if ( not _run_this_step($1) ) {
             $results_stdout .= "not included: [id $_id] $_file (run on $1)\n";
-            return q{};
-        }
-    }
-
-    if ($_match =~ /autocontrolleronly/) {
-        if (not $opt_autocontroller) {
-            $results_stdout .= "not included: [id $_id] $_file (autocontrolleronly)\n";
             return q{};
         }
     }
@@ -3736,7 +3704,6 @@ sub get_options {  #shell options
         'v|V|version'   => \$opt_version,
         'c|config=s'    => \$opt_configfile,
         'o|output=s'    => \$opt_output,
-        'a|autocontroller'    => \$opt_autocontroller,
         'p|port=s'    => \$opt_port,
         'x|proxy=s'   => \$opt_proxy,
         'd|driver=s'   => \$opt_driver,
@@ -3804,12 +3771,11 @@ sub print_version {
 
 sub print_usage {
         print <<'EOB'
-Usage: webinject.pl testcase_file <<options>>
+Usage: statebot.pl testcase_file <<options>>
 
                                                     examples/simple.xml
 -c|--config config_file                             -c config.xml
 -o|--output output_location                         -o output/
--A|--autocontroller                                 -a
 -p|--port selenium_port                             -p 8325
 -x|--proxy proxy_server                             -x localhost:9222
 -b|--basefolder baselined image folder              -b examples/basefoler/
