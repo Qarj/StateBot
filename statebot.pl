@@ -96,6 +96,7 @@ $hostname =~ s/\r|\n//g; ## strip out any rogue linefeeds or carriage returns
 my $is_windows = $^O eq 'MSWin32' ? 1 : 0;
 
 my ($all_goals_reached, $failure_condition_reached);
+my (%state_info);
 
 ## Startup
 get_options();  #get command line options
@@ -140,6 +141,7 @@ $results_stdout .= "-------------------------------------------------------\n";
 # Main Loop
 #
 # - determine which action to execute based on current state
+# - parse responses (i.e. action verify-texts)
 # - execute that action
 # - check if any goals have been reached, if so report success and increment number of times that goal has been reached
 # - check if all goals have been reached at least once, if so report success and end execution
@@ -254,6 +256,140 @@ exit $status;
 #  SUBROUTINES
 #------------------------------------------------------------------
 
+sub determine_action_to_execute {
+
+# Iterate over actions
+#     For each verify-text
+#         Call Selenium to get the verify-text data UNLESS we already if it
+#         For each positive assertion
+#             Assume assertion not met
+#             Check if assertion met, if so assertion has passed
+#         For each negative assertion
+#             Assume assertion met
+#             Check if assertion met, if not assertion has failed
+#     If all assertions met, chosen action is returned
+#     If action has no assertion, we make a note of it
+#
+# Return the action with no assertion (start / default re-start point)
+#
+# Return null - no action found
+
+#    @test_steps = sort {$a<=>$b} keys %{$xml_test_cases->{case}};
+
+    undef %stafe_info;
+
+    foreach my $_action ( keys %{ $xml_test_cases->{action} } ) {
+
+        my $_all_assertions_match;
+        if ($_action{verifytext}) {
+            my @_parse_verify = split /,/, $_action{verifytext} ;
+            foreach (@_parse_verify) {
+                my $_verify_text = $_;
+                if (not $state_info{$_verify_text}) {
+                    _get_selenium_info($_verify_text);
+                }
+                foreach my $_case_attribute ( sort keys %{ $_action } ) {
+                    if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' ) {
+                        $_all_assertions_match = $_all_assertions_match or _verify_positive($_action{$_case_attribute}, \$state_info{$_verify_text});
+                    }
+                }
+            }
+        }
+
+
+    }
+
+
+    return;
+}
+
+
+#------------------------------------------------------------------
+sub _verify_positive {
+    my ($_assertion, $_state_text) = @_;
+
+#    my $_verify_number = $_case_attribute; ## determine index verifypositive index
+#    $_verify_number =~ s/^verifypositive//g; ## remove verifypositive from string
+#    if (!$_verify_number) {$_verify_number = '0';} #In case of verifypositive, need to treat as 0
+    my @_verifyparms = split /[|][|][|]/, $_assertion ; #index 0 contains the actual string to verify, 1 the message to show if the assertion fails, 2 the tag that it is a known issue
+    my $_fail_fast = _is_fail_fast(\$_verifyparms[0]); ## will strip off leading fail fast! if present
+    if ($_verifyparms[2]) { ## assertion is being ignored due to known production bug or whatever
+        $results_html .= qq|<span class="skip">Skipped Positive Verification $_verify_number - $_verifyparms[2]</span><br />\n|;
+        $results_stdout .= "Skipped Positive Verification $_verify_number - $_verifyparms[2] \n";
+        $assertion_skips++;
+        $assertion_skips_message = $assertion_skips_message . '[' . $_verifyparms[2] . ']';
+    }
+    else {
+        $results_xml .= "            <$_case_attribute>\n";
+        $results_xml .= '                <assert>'._sub_xml_special($_verifyparms[0])."</assert>\n";
+        if ( ${ $_state_text } =~ m/$_assertion/si) {  ## verify existence of string in state text
+            $results_html .= qq|<span class="pass">Passed Positive Verification</span><br />\n|;
+            $results_xml .= qq|                <success>true</success>\n|;
+            $results_stdout .= "Passed Positive Verification \n";
+            #$results_stdout .= $_verify_number." Passed Positive Verification \n"; ##DEBUG
+            $passed_count++;
+            $retry_passed_count++;
+        }
+        else {
+            $results_html .= qq|<span class="fail">Failed Positive Verification:</span>$_verifyparms[0]<br />\n|;
+            $results_xml .= qq|                <success>false</success>\n|;
+            if ($_verifyparms[1]) { ## is there a custom assertion failure message?
+               $results_html .= qq|<span class="fail">$_verifyparms[1]</span><br />\n|;
+               $results_xml .= '                <message>'._sub_xml_special($_verifyparms[1])."</message>\n";
+            }
+            $results_stdout .= "Failed Positive Verification $_verify_number\n";
+            if ($_verifyparms[1]) {
+               $results_stdout .= "$_verifyparms[1] \n";
+            }
+            $failed_count++;
+            $retry_failed_count++;
+            $is_failure++;
+            if ($_fail_fast) {
+                if ($retry > 0) { $results_stdout .= "==> Won't retry - a fail fast was invoked \n"; }
+                $retry=0; ## we won't retry if a fail fast was invoked
+                $fast_fail_invoked = 'true';
+            }
+        }
+        $results_xml .= qq|            </$_case_attribute>\n|;
+    }
+
+    return;
+}
+#------------------------------------------------------------------
+sub display_request_response {
+    my ($_verify_text) = @_;
+
+    $results_stdout .= "$_\n";
+    my @_verify_response;
+
+    if ($_verify_text eq 'get_body_text') {
+        eval { @_verify_response =  $driver->find_element('body','tag_name')->get_text(); };
+    } else {
+        eval { @_verify_response = $driver->$_(); }; ## sometimes Selenium will return an array
+    }
+
+    my $_idx = 0;
+    foreach my $_vresp (@_verify_response) {
+        $_vresp =~ s/[^[:ascii:]]+//g; ## get rid of non-ASCII characters in the string element
+        $_idx++; ## we number the verifytexts from 1 onwards to tell them apart in the tags
+        $state_info($_verify_text) =~ s{$}{<$_verify_text$_idx>$_vresp</$_verify_text$_idx>\n}; ## include it in the response
+        if (($_vresp =~ m/(^|=)HASH\b/) || ($_vresp =~ m/(^|=)ARRAY\b/)) { ## check to see if we have a HASH or ARRAY object returned
+            my $_dumper_response = Data::Dumper::Dumper($_vresp);
+            my $_dumped = 'dumped';
+            $state_info($_verify_text) =~ s{$}{<$_verify_text$_dumped$_idx>$_dumper_response</$_verify_text$_dumped$_idx>\n}; ## include it in the response
+            ## ^ means match start of string, $ end of string
+        }
+    }
+
+    ## always make sure $state_info($_verify_text) has something after the call to prevent repeatedly calling this subroutine and getting nothing
+    if (not $state_info($_verify_text)) {
+        $state_info($_verify_text) = 'NULL';
+    }
+
+    return;
+}
+
+#------------------------------------------------------------------
 sub display_request_response {
 
     if (not $opt_verbose) { return; }
@@ -264,6 +400,7 @@ sub display_request_response {
     return;
 }
 
+#------------------------------------------------------------------
 sub get_testnum_display {
     my ($_testnum_display) = @_;
 
@@ -898,8 +1035,8 @@ sub selenium {  ## send Selenium command and read response
     $end_timer = time; ## we only want to measure the time it took for the commands, not to do the screenshots and verification
     $latency = (int(1000 * ($end_timer - $start_timer)) / 1000);  ## elapsed time rounded to thousandths
 
-    _get_verifytext(); ## will be injected into $selresp
-    $response = HTTP::Response->parse($selresp); ## pretend the response is an http response - inject it into the object
+#    _get_verifytext(); ## will be injected into $selresp
+#    $response = HTTP::Response->parse($selresp); ## pretend the response is an http response - inject it into the object
 
     _screenshot();
 
