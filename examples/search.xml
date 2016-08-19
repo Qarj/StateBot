@@ -1,7 +1,7 @@
 <testcases repeat="1">
 
 <action
-    section="Selenium Smoke Test"
+    section="Search for Automation Engineer Jobs in London"
     id="10"
     description1="Get Totaljobs Home Page"
     method="selenium"
@@ -40,7 +40,7 @@
 />
 
 <goal
-    id="50"
+    id="1"
     description1="Check that Search Results page displayed"
     verifytext="get_body_text,get_current_url"
     verifypositive1="Automation Engineer jobs in London"
@@ -48,13 +48,18 @@
 />
 
 <fail
-    id="60"
+    id="1"
     description1="Should not show error page"
     verifytext="get_body_text,get_current_url"
     verifypositive1="Looks like we have a problem"
     verifypositive2="Error.aspx"
 />
 
+<fail
+    id="2"
+    description1="Should not take more than 10 actions"
+    max-actions="10"
+/>
 
 
 </testcases>

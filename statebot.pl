@@ -3771,7 +3771,7 @@ sub print_usage {
         print <<'EOB'
 Usage: statebot.pl testcase_file <<options>>
 
-                                                    examples/simple.xml
+                                                    examples/search.xml
 -c|--config config_file                             -c config.xml
 -o|--output output_location                         -o output/
 -p|--port selenium_port                             -p 8325
@@ -3782,6 +3782,8 @@ Usage: statebot.pl testcase_file <<options>>
 -n|--no-output                                      -n
 -e|--verbose                                        -e
 -u|--publish-to                                     -u C:\inetpub\wwwroot\this_run_home
+
+statebot.pl examples/search.xml --driver chromedriver --binary C:\selenium-server\chromedriver.exe
 
 or
 
