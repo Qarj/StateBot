@@ -96,6 +96,8 @@ $hostname =~ s/\r|\n//g; ## strip out any rogue linefeeds or carriage returns
 
 my $is_windows = $^O eq 'MSWin32' ? 1 : 0;
 
+my $all_goals_reached;
+
 ## Startup
 get_options();  #get command line options
 process_case_file();
@@ -132,6 +134,10 @@ if ($opt_driver) { start_selenium_browser(); }  ## start selenium browser if app
 
 $results_stdout .= "-------------------------------------------------------\n";
 
+    $run_count = 0;
+    $jumpbacks_print = q{}; ## we do not indicate a jump back until we actually jump back
+    $jumpbacks = 0;
+
 # Main Loop
 #
 # - determine which action to execute based on current state
@@ -143,96 +149,90 @@ $results_stdout .= "-------------------------------------------------------\n";
 #           check if maximum number of retries has been reached for that condition, if so report failure and end execution    
 #
 
-    $run_count = 0;
-    $jumpbacks_print = q{}; ## we do not indicate a jump back until we actually jump back
-    $jumpbacks = 0;
-
-    @test_steps = sort {$a<=>$b} keys %{$xml_test_cases->{case}};
-    my $numsteps = scalar @test_steps;
+#    @test_steps = sort {$a<=>$b} keys %{$xml_test_cases->{case}};
+#    my $numsteps = scalar @test_steps;
 
     ## Loop over each of the test cases (test steps) with C Style for loop (due to need to update $step_index in a non standard fashion)
-    TESTCASE:   for ($step_index = 0; $step_index < $numsteps; $step_index++) {  ## no critic(ProhibitCStyleForLoops)
+#    TESTCASE:   for ($step_index = 0; $step_index < $numsteps; $step_index++) {  ## no critic(ProhibitCStyleForLoops)
 
-        $testnum = $test_steps[$step_index];
+#        $testnum = $test_steps[$step_index];
 
-        $testnum_display = get_testnum_display($testnum);
+while (!$all_goals_reached) {
+    $testnum = determine_action_to_execute();
+    if (!$testnum) { die "Nothing to do!\n\nSuggest adding an action with no pre-condition - e.g. Get home page\n"; }
 
-        $is_failure = 0;
-        $retries = 1; ## we increment retries after writing to the log
-        $retries_print = q{}; ## the printable value is used before writing the results to the log, so it is one behind, 0 being printed as null
+    $testnum_display = get_testnum_display($testnum);
 
-        set_useragent($xml_test_cases->{case}->{$testnum}->{useragent});
+    $is_failure = 0;
+    $retries = 1; ## we increment retries after writing to the log
+    $retries_print = q{}; ## the printable value is used before writing the results to the log, so it is one behind, 0 being printed as null
 
-        my $skip_message = get_test_step_skip_message();
-        if ( $skip_message ) {
-            $results_stdout .= "Skipping Test Case $testnum... ($skip_message)\n";
-            $results_stdout .= qq|------------------------------------------------------- \n|;
-            next TESTCASE; ## skip running this test step
-        }
+    set_useragent($xml_test_cases->{case}->{$testnum}->{useragent});
 
-        # populate variables with values from testcase file, do substitutions, and revert converted values back
-        substitute_variables();
+    my $skip_message = get_test_step_skip_message();
+    if ( $skip_message ) {
+        $results_stdout .= "Skipping Test Case $testnum... ($skip_message)\n";
+        $results_stdout .= qq|------------------------------------------------------- \n|;
+        next TESTCASE; ## skip running this test step
+    }
 
-        $retry = get_number_of_times_to_retry_this_test_step(); # 0 means do not retry this step
+    # populate variables with values from testcase file, do substitutions, and revert converted values back
+    substitute_variables();
 
-        do ## retry loop
-        {
-            substitute_retry_variables(); ## for each retry, there are a few substitutions that we need to redo - like the retry number
-            set_var_variables(); ## finally set any variables after doing all the static and dynamic substitutions
-            substitute_var_variables();
+#   $retry = get_number_of_times_to_retry_this_test_step(); # 0 means do not retry this step
 
-            set_retry_to_zero_if_global_limit_exceeded();
+#   substitute_retry_variables(); ## for each retry, there are a few substitutions that we need to redo - like the retry number
+    set_var_variables(); ## finally set any variables after doing all the static and dynamic substitutions
+    substitute_var_variables();
 
-            $is_failure = 0;
-            $fast_fail_invoked = 'false';
-            $retry_passed_count = 0;
-            $retry_failed_count = 0;
+    set_retry_to_zero_if_global_limit_exceeded();
 
-            if ($case{description1} and $case{description1} =~ /dummy test case/) {  ## if we hit the dummy record, skip it (this is a hack for test case files with only one step)
-                next;
-            }
+    $is_failure = 0;
+    $fast_fail_invoked = 'false';
+    $retry_passed_count = 0;
+    $retry_failed_count = 0;
 
-            output_test_step_description();
-            output_assertions();
+    if ($case{description1} and $case{description1} =~ /dummy test case/) {  ## if we hit the dummy record, skip it (this is a hack for test case files with only one step)
+        next;
+    }
 
-            execute_test_step();
-            display_request_response();
+    output_test_step_description();
+    output_assertions();
 
-            decode_quoted_printable();
+    execute_test_step();
+    display_request_response();
 
-            verify(); #verify result from http response
+    decode_quoted_printable();
 
-            gethrefs(); ## get specified web page href assets
-            getsrcs(); ## get specified web page src assets
-            getbackgroundimages(); ## get specified web page src assets
+    verify(); #verify result from http response
 
-            parseresponse();  #grab string from response to send later
+    gethrefs(); ## get specified web page href assets
+    getsrcs(); ## get specified web page src assets
+    getbackgroundimages(); ## get specified web page src assets
 
-            httplog();  #write to http.txt file
+    parseresponse();  #grab string from response to send later
 
-            pass_fail_or_retry();
+    httplog();  #write to http.txt file
 
-            output_test_step_latency();
-            output_test_step_results();
+    pass_fail_or_retry();
 
-            increment_run_count();
-            update_latency_statistics();
+    output_test_step_latency();
+    output_test_step_results();
 
-            restart_browser();
+    increment_run_count();
+    update_latency_statistics();
 
-            sleep_before_next_step();
+    restart_browser();
 
-            $retry = $retry - 1;
-        } ## end of retry loop
-        until ($retry < 0); ## no critic(ProhibitNegativeExpressionsInUnlessAndUntilConditions])
+    sleep_before_next_step();
 
-        if ($case{sanitycheck} && ($case_failed_count > 0)) { ## if sanitycheck fails (i.e. we have had any error at all after retries exhausted), then execution is aborted
-            $results_stdout .= qq|SANITY CHECK FAILED ... Aborting \n|;
-            last;
-        }
-    } ## end of test case loop
+    $retry = $retry - 1;
 
-    $testnum = 1;  #reset testcase counter so it will reprocess test case file if repeat is set
+    if ($case{sanitycheck} && ($case_failed_count > 0)) { ## if sanitycheck fails (i.e. we have had any error at all after retries exhausted), then execution is aborted
+        $results_stdout .= qq|SANITY CHECK FAILED ... Aborting \n|;
+        last;
+    }
+} ## end of while loop
 
 $end_run_timer = time;
 $total_run_time = (int(1000 * ($end_run_timer - $start_run_timer)) / 1000);  #elapsed time rounded to thousandths
