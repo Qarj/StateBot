@@ -95,7 +95,7 @@ $hostname =~ s/\r|\n//g; ## strip out any rogue linefeeds or carriage returns
 
 my $is_windows = $^O eq 'MSWin32' ? 1 : 0;
 
-my $all_goals_reached;
+my ($all_goals_reached, $failure_condition_reached);
 
 ## Startup
 get_options();  #get command line options
@@ -156,7 +156,7 @@ $results_stdout .= "-------------------------------------------------------\n";
 
 #        $testnum = $test_steps[$step_index];
 
-while (!$all_goals_reached) {
+while (!$all_goals_reached && !$failure_condition_reached) {
     $testnum = determine_action_to_execute();
     if (!$testnum) { die "Nothing to do!\n\nSuggest adding an action with no pre-condition - e.g. Get home page\n"; }
 
@@ -224,6 +224,14 @@ while (!$all_goals_reached) {
     restart_browser();
 
     sleep_before_next_step();
+
+    check_if_any_goals_reached();
+
+    $all_goals_reached = check_if_all_goals_reached();
+
+    if (!$all_goals_reached) {
+        $failure_condition_reached = check_if_failure_conditon_reached();
+    }
 
 #    $retry = $retry - 1;
 
