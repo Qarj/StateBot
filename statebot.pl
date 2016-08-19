@@ -49,7 +49,6 @@ my ($return_message); ## error message to return to nagios
 my ($testnum, $xml_test_cases, $step_index, @test_steps);
 my ($testnum_display, $previous_test_step, $delayed_file_full, $delayed_html); ## individual step file html logging
 my ($retry, $retries, $globalretries, $retry_passed_count, $retry_failed_count, $retries_print, $jumpbacks, $jumpbacks_print); ## retry failed tests
-my ($sanity_result); ## if a sanity check fails, execution will stop (as soon as all retries are exhausted on the current test case)
 my ($start_time); ## to store a copy of $start_run_timer in a global variable
 my ($output, $output_folder, $output_prefix); ## output path including possible filename prefix, output path without filename prefix, output prefix only
 my ($outsum); ## outsum is a checksum calculated on the output directory name. Used to help guarantee test data uniqueness where two StateBot processes are running in parallel.
@@ -204,7 +203,7 @@ while (!$all_goals_reached) {
 
     decode_quoted_printable();
 
-    verify(); #verify result from http response
+#    verify(); #verify result from http response
 
     gethrefs(); ## get specified web page href assets
     getsrcs(); ## get specified web page src assets
@@ -226,12 +225,8 @@ while (!$all_goals_reached) {
 
     sleep_before_next_step();
 
-    $retry = $retry - 1;
+#    $retry = $retry - 1;
 
-    if ($case{sanitycheck} && ($case_failed_count > 0)) { ## if sanitycheck fails (i.e. we have had any error at all after retries exhausted), then execution is aborted
-        $results_stdout .= qq|SANITY CHECK FAILED ... Aborting \n|;
-        last;
-    }
 } ## end of while loop
 
 $end_run_timer = time;
@@ -318,7 +313,7 @@ sub substitute_variables {
     ## "verifynegative", "verifynegative1", ... "verifynegative9999",
     ## "parseresponse", "parseresponse1", ... , "parseresponse40", ... , "parseresponse9999", "parseresponseORANYTHING", "verifyresponsecode",
     ## "verifyresponsetime", "sleep", "errormessage", "ignorehttpresponsecode", "ignoreautoassertions", "ignoresmartassertions",
-    ## "retry", "sanitycheck", "logastext", "section", "assertcount", "searchimage", ... "searchimage5", "formatxml", "formatjson",
+    ## "retry", "logastext", "section", "assertcount", "searchimage", ... "searchimage5", "formatxml", "formatjson",
     ## "logresponseasfile", "addcookie", "restartbrowseronfail", "restartbrowser", "commandonerror", "gethrefs", "getsrcs", "getbackgroundimages",
     ## "firstlooponly", "lastlooponly", "decodequotedprintable"
 
@@ -745,13 +740,6 @@ sub write_final_html {  #write summary and closing tags for results file
 #------------------------------------------------------------------
 sub write_final_xml {  #write summary and closing tags for XML results file
 
-    if ($case{sanitycheck} && ($case_failed_count > 0)) { ## sanitycheck
-        $sanity_result = 'false';
-    }
-    else {
-        $sanity_result = 'true';
-    }
-
     $results_xml .= qq|    </testcases>\n\n|;
 
     $results_xml .= qq|    <test-summary>\n|;
@@ -770,7 +758,7 @@ sub write_final_xml {  #write summary and closing tags for XML results file
     $results_xml .= qq|        <average-response-time>$avg_response</average-response-time>\n|;
     $results_xml .= qq|        <max-response-time>$max_response</max-response-time>\n|;
     $results_xml .= qq|        <min-response-time>$min_response</min-response-time>\n|;
-    $results_xml .= qq|        <sanity-check-passed>$sanity_result</sanity-check-passed>\n|;
+    $results_xml .= qq|        <sanity-check-passed>true</sanity-check-passed>\n|;
     $results_xml .= qq|        <test-file-name>$testfilename</test-file-name>\n|;
     $results_xml .= qq|    </test-summary>\n\n|;
 
