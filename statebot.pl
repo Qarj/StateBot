@@ -132,7 +132,7 @@ read_test_case_file();
 
 if ($opt_driver) { start_selenium_browser(); }  ## start selenium browser if applicable. If it is already started, close browser then start it again.
 
-$results_stdout .= "-------------------------------------------------------\n";
+print "-------------------------------------------------------\n";
 
     $run_count = 0;
     $jumpbacks_print = q{}; ## we do not indicate a jump back until we actually jump back
@@ -150,7 +150,7 @@ $results_stdout .= "-------------------------------------------------------\n";
 #           check if maximum number of retries has been reached for that condition, if so report failure and end execution    
 #
 
-#    @test_steps = sort {$a<=>$b} keys %{$xml_test_cases->{case}};
+#    @test_steps = sort {$a<=>$b} keys %{$xml_test_cases->{action}};
 #    my $numsteps = scalar @test_steps;
 
     ## Loop over each of the test cases (test steps) with C Style for loop (due to need to update $step_index in a non standard fashion)
@@ -169,7 +169,7 @@ while (!$all_goals_reached && !$failure_condition_reached) {
     $retries = 1; ## we increment retries after writing to the log
     $retries_print = q{}; ## the printable value is used before writing the results to the log, so it is one behind, 0 being printed as null
 
-    set_useragent($xml_test_cases->{case}->{$testnum}->{useragent});
+    set_useragent($xml_test_cases->{action}->{$testnum}->{useragent});
 
     my $skip_message = get_test_step_skip_message();
     if ( $skip_message ) {
@@ -179,13 +179,14 @@ while (!$all_goals_reached && !$failure_condition_reached) {
     }
 
     # populate variables with values from testcase file, do substitutions, and revert converted values back
-    substitute_variables();
 
 #   $retry = get_number_of_times_to_retry_this_test_step(); # 0 means do not retry this step
 
-#   substitute_retry_variables(); ## for each retry, there are a few substitutions that we need to redo - like the retry number
+    substitute_variables();
     set_var_variables(); ## finally set any variables after doing all the static and dynamic substitutions
     substitute_var_variables();
+
+#   substitute_retry_variables(); ## for each retry, there are a few substitutions that we need to redo - like the retry number
 
     set_retry_to_zero_if_global_limit_exceeded();
 
@@ -216,7 +217,7 @@ while (!$all_goals_reached && !$failure_condition_reached) {
 
     httplog();  #write to http.txt file
 
-    pass_fail_or_retry();
+#    pass_fail_or_retry();
 
     output_test_step_latency();
     output_test_step_results();
@@ -228,12 +229,12 @@ while (!$all_goals_reached && !$failure_condition_reached) {
 
     sleep_before_next_step();
 
-    check_if_any_goals_reached();
+#    check_if_any_goals_reached();
 
-    $all_goals_reached = check_if_all_goals_reached();
+#    $all_goals_reached = check_if_all_goals_reached();
 
     if (!$all_goals_reached) {
-        $failure_condition_reached = check_if_failure_conditon_reached();
+#        $failure_condition_reached = check_if_failure_conditon_reached();
     }
 
 #    $retry = $retry - 1;
@@ -271,7 +272,7 @@ sub determine_action_to_execute {
 #
 # Return null - no action found
 
-#    @test_steps = sort {$a<=>$b} keys %{$xml_test_cases->{case}};
+#    @test_steps = sort {$a<=>$b} keys %{$xml_test_cases->{action}};
 
     my @actions = sort {$a<=>$b} keys %{$xml_test_cases->{action}};
 
@@ -295,10 +296,12 @@ sub determine_action_to_execute {
                 }
                 foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$_action_id} } ) {
                     if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' ) {
+                        #$_all_assertions_match = $_all_assertions_match or _verify_positive(convert_back_var_variables(convert_back_xml($xml_test_cases->{action}->{$_action_id}->{$_case_attribute})), \$state_info{$_verify_text});
                         $_all_assertions_match = $_all_assertions_match or _verify_positive($xml_test_cases->{action}->{$_action_id}->{$_case_attribute}, \$state_info{$_verify_text});
                     }
                 }
                 if ($_all_assertions_match) {
+                    print "All assertions match for $_action_id\n";
                     return $_action_id;
                 }
             }
@@ -307,6 +310,7 @@ sub determine_action_to_execute {
         }
     }
 
+    print "No action passes assertions\n";
     return $_default_action; # will be null if no action found
 }
 
@@ -314,6 +318,8 @@ sub determine_action_to_execute {
 #------------------------------------------------------------------
 sub _verify_positive {
     my ($_assertion, $_state_text) = @_;
+    print "Processing assertion: $_assertion\n";
+    convert_back_var_variables(convert_back_xml($_assertion));
 
 #    my $_verify_number = $_case_attribute; ## determine index verifypositive index
 #    $_verify_number =~ s/^verifypositive//g; ## remove verifypositive from string
@@ -327,11 +333,11 @@ sub _verify_positive {
     }
     else {
 #        $results_xml .= "            <$_case_attribute>\n";
-        $results_xml .= '                <assert>'._sub_xml_special($_verifyparms[0])."</assert>\n";
+#        $results_xml .= '                <assert>'._sub_xml_special($_verifyparms[0])."</assert>\n";
         if ( ${ $_state_text } =~ m/$_assertion/si) {  ## verify existence of string in state text
 #            $results_html .= qq|<span class="pass">Passed Positive Verification</span><br />\n|;
 #            $results_xml .= qq|                <success>true</success>\n|;
-            $results_stdout .= "Passed Positive Verification \n";
+            print "Passed Positive Verification $_assertion\n";
             #$results_stdout .= $_verify_number." Passed Positive Verification \n"; ##DEBUG
 #            $passed_count++;
 #            $retry_passed_count++;
@@ -344,7 +350,7 @@ sub _verify_positive {
 #               $results_html .= qq|<span class="fail">$_verifyparms[1]</span><br />\n|;
 #               $results_xml .= '                <message>'._sub_xml_special($_verifyparms[1])."</message>\n";
 #             }
-            $results_stdout .= "Failed Positive Verification $_assertion\n";
+            print "Failed Positive Verification $_assertion\n";
             if ($_verifyparms[1]) {
                $results_stdout .= "$_verifyparms[1] \n";
             }
@@ -374,7 +380,7 @@ sub _get_selenium_info {
     foreach my $_vresp (@_verify_response) {
         $_vresp =~ s/[^[:ascii:]]+//g; ## get rid of non-ASCII characters in the string element
         $_idx++; ## we number the verifytexts from 1 onwards to tell them apart in the tags
-        $state_info{$_verify_text} =~ s{$}{<$_verify_text$_idx>$_vresp</$_verify_text$_idx>\n}; ## include it in the response
+        $state_info{$_verify_text} = "<$_verify_text$_idx>$_vresp</$_verify_text$_idx>\n"; ## create state info
         if (($_vresp =~ m/(^|=)HASH\b/) || ($_vresp =~ m/(^|=)ARRAY\b/)) { ## check to see if we have a HASH or ARRAY object returned
             my $_dumper_response = Data::Dumper::Dumper($_vresp);
             my $_dumped = 'dumped';
@@ -429,7 +435,7 @@ sub set_useragent {
 #------------------------------------------------------------------
 sub get_test_step_skip_message {
 
-    $case{runon} = $xml_test_cases->{case}->{$testnum}->{runon}; ## skip test cases not flagged for this environment
+    $case{runon} = $xml_test_cases->{action}->{$testnum}->{runon}; ## skip test cases not flagged for this environment
     if ($case{runon}) { ## is this test step conditional on the target environment?
         if ( _run_this_step($case{runon}) ) {
             ## run this test case as normal since it is allowed
@@ -439,7 +445,7 @@ sub get_test_step_skip_message {
         }
     }
 
-    $case{donotrunon} = $xml_test_cases->{case}->{$testnum}->{donotrunon}; ## skip test cases flagged not to run on this environment
+    $case{donotrunon} = $xml_test_cases->{action}->{$testnum}->{donotrunon}; ## skip test cases flagged not to run on this environment
     if ($case{donotrunon}) { ## is this test step conditional on the target environment?
         if ( not _run_this_step($case{donotrunon}) ) {
             ## run this test case as normal since it is allowed
@@ -468,10 +474,10 @@ sub substitute_variables {
 
     undef %case_save; ## we need a clean array for each test case
     undef %case; ## do not allow values from previous test cases to bleed over
-    foreach my $_case_attribute ( keys %{ $xml_test_cases->{case}->{$testnum} } ) {
-        #print "DEBUG: $_case_attribute", ": ", $xml_test_cases->{case}->{$testnum}->{$_case_attribute};
+    foreach my $_case_attribute ( keys %{ $xml_test_cases->{action}->{$testnum} } ) {
+        #print "DEBUG: $_case_attribute", ": ", $xml_test_cases->{action}->{$testnum}->{$_case_attribute};
         #print "\n";
-        $case{$_case_attribute} = $xml_test_cases->{case}->{$testnum}->{$_case_attribute};
+        $case{$_case_attribute} = $xml_test_cases->{action}->{$testnum}->{$_case_attribute};
         convert_back_xml($case{$_case_attribute});
         $case_save{$_case_attribute} = $case{$_case_attribute}; ## in case we have to retry, some parms need to be resubbed
     }
@@ -483,7 +489,7 @@ sub substitute_variables {
 sub get_number_of_times_to_retry_this_test_step {
 
     my $_retry;
-    $case{retry} = $xml_test_cases->{case}->{$testnum}->{retry}; ## optional retry of a failed test case
+    $case{retry} = $xml_test_cases->{action}->{$testnum}->{retry}; ## optional retry of a failed test case
     if ($case{retry}) { ## retry parameter found
         $_retry = $case{retry}; ## assume we can retry as many times as specified
         if ($config{globalretry}) { ## ensure that the global retry limit won't be exceeded
@@ -507,7 +513,7 @@ sub get_number_of_times_to_retry_this_test_step {
 #------------------------------------------------------------------
 sub substitute_retry_variables {
 
-    foreach my $_case_attribute ( keys %{ $xml_test_cases->{case}->{$testnum} } ) {
+    foreach my $_case_attribute ( keys %{ $xml_test_cases->{action}->{$testnum} } ) {
         if (defined $case_save{$_case_attribute}) ## defaulted parameters like posttype may not have a saved value on a subsequent loop
         {
             $case{$_case_attribute} = $case_save{$_case_attribute}; ## need to restore to the original partially substituted parameter
@@ -555,7 +561,7 @@ sub output_assertions {
     ## display and log the verifications to do to stdout and html - xml output is done with the verification itself
     ## verifypositive, verifypositive1, ..., verifypositive9999 (or even higher)
     ## verifynegative, verifynegative2, ..., verifynegative9999 (or even higher)
-    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{case}->{$testnum} } ) {
+    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$testnum} } ) {
         if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' || (substr $_case_attribute, 0, 14) eq 'verifynegative') {
             my $_verifytype = substr $_case_attribute, 6, 8; ## so we get the word positive or negative
             $_verifytype = ucfirst $_verifytype; ## change to Positive or Negative
@@ -666,13 +672,13 @@ sub output_test_step_latency {
     $results_xml .= qq|            <responsetime>$latency</responsetime>\n|;
 
     if ($case{method} eq 'selenium') {
-        $results_html .= qq|Verification Time = $verification_latency sec <br />\n|;
+#        $results_html .= qq|Verification Time = $verification_latency sec <br />\n|;
         $results_html .= qq|Screenshot Time = $screenshot_latency sec <br />\n|;
 
-        $results_stdout .= qq|Verification Time = $verification_latency sec \n|;
+#        $results_stdout .= qq|Verification Time = $verification_latency sec \n|;
         $results_stdout .= qq|Screenshot Time = $screenshot_latency sec \n|;
 
-        $results_xml .= qq|            <verificationtime>$verification_latency</verificationtime>\n|;
+#        $results_xml .= qq|            <verificationtime>$verification_latency</verificationtime>\n|;
         $results_xml .= qq|            <screenshottime>$screenshot_latency</screenshottime>\n|;
     }
 
@@ -848,8 +854,8 @@ sub _write_html {
 #------------------------------------------------------------------
 sub write_initial_stdout {  #write initial text for STDOUT
 
-    $results_stdout .= "\n";
-    $results_stdout .= "Starting StateBot Engine...\n\n";
+    print "\n";
+    print "Starting StateBot Engine...\n\n";
 
     return;
 }
@@ -1038,7 +1044,7 @@ sub selenium {  ## send Selenium command and read response
     $latency = (int(1000 * ($end_timer - $start_timer)) / 1000);  ## elapsed time rounded to thousandths
 
 #    _get_verifytext(); ## will be injected into $selresp
-#    $response = HTTP::Response->parse($selresp); ## pretend the response is an http response - inject it into the object
+    $response = HTTP::Response->parse($selresp); ## pretend the response is an http response - inject it into the object
 
     _screenshot();
 
@@ -2421,7 +2427,7 @@ sub _verify_smartassertion {
 
 sub _verify_verifypositive {
 
-    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{case}->{$testnum} } ) {
+    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$testnum} } ) {
         if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' ) {
             my $_verify_number = $_case_attribute; ## determine index verifypositive index
             $_verify_number =~ s/^verifypositive//g; ## remove verifypositive from string
@@ -2475,7 +2481,7 @@ sub _verify_verifypositive {
 
 sub _verify_verifynegative {
 
-    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{case}->{$testnum} } ) {
+    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$testnum} } ) {
         if ( (substr $_case_attribute, 0, 14) eq 'verifynegative' ) {
             my $_verify_number = $_case_attribute; ## determine index verifypositive index
             #$results_stdout .= "$_case_attribute\n"; ##DEBUG
@@ -2541,7 +2547,7 @@ sub _is_fail_fast {
 
 sub _verify_assertcount {
 
-    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{case}->{$testnum} } ) {
+    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$testnum} } ) {
         if ( (substr $_case_attribute, 0, 11) eq 'assertcount' ) {
             my $_verify_number = $_case_attribute; ## determine index verifypositive index
             #$results_stdout .= "$_case_attribute\n"; ##DEBUG
@@ -2598,7 +2604,7 @@ sub parseresponse {  #parse values from responses for use in future request (for
     my ($_response_to_parse, @_parse_args);
     my ($_left_boundary, $_right_boundary, $_escape);
 
-    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{case}->{$testnum} } ) {
+    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$testnum} } ) {
 
         if ( (substr $_case_attribute, 0, 13) eq 'parseresponse' ) {
 
@@ -3084,7 +3090,7 @@ sub convert_back_var_variables { ## e.g. postbody="time={RUNSTART}"
 ## use critic
 #------------------------------------------------------------------
 sub set_var_variables { ## e.g. varRUNSTART="{HH}{MM}{SS}"
-    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{case}->{$testnum} } ) {
+    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$testnum} } ) {
        if ( (substr $_case_attribute, 0, 3) eq 'var' ) {
             $varvar{$_case_attribute} = $case{$_case_attribute}; ## assign the variable
         }
@@ -3096,7 +3102,7 @@ sub set_var_variables { ## e.g. varRUNSTART="{HH}{MM}{SS}"
 #------------------------------------------------------------------
 sub substitute_var_variables {
 
-    foreach my $_case_attribute ( keys %{ $xml_test_cases->{case}->{$testnum} } ) { ## then substitute them in
+    foreach my $_case_attribute ( keys %{ $xml_test_cases->{action}->{$testnum} } ) { ## then substitute them in
         convert_back_var_variables($case{$_case_attribute});
     }
 
@@ -3576,7 +3582,7 @@ sub start_selenium_browser {     ## start Browser using Selenium Server or Chrom
                                                  );
 
                 } else {
-                    $results_stdout .= "Starting ChromeDriver without a proxy\n";
+                    print "Starting ChromeDriver without a proxy\n";
                     $driver = Selenium::Chrome->new (binary => $opt_chromedriver_binary,
                                                  binary_port => $_port,
                                                  _binary_args => " --port=$_port --url-base=/wd/hub --verbose --log-path=$output".'chromedriver.log',
