@@ -1,0 +1,60 @@
+<testcases repeat="1">
+
+<action
+    section="Selenium Smoke Test"
+    id="10"
+    description1="Get Totaljobs Home Page"
+    method="selenium"
+    command='$selresp = $driver->get("http://www.totaljobs.com");'
+/>
+
+<action
+    id="20"
+    description1="Type in search keywords and location"
+    verifytext="get_body_text"
+    verifypositive="Find your perfect job"
+    method="selenium"
+    command1="$selresp = helper_clear_and_send_keys('keywords','id','Automation Engineer');"
+    command2="$selresp = helper_clear_and_send_keys('location','id','Test');"
+/>
+
+<action
+    id="30"
+    description1="Click Search button on Homepage"
+    verifytext="get_body_text,get_current_url"
+    verifypositive1="Automation Engineer"
+    verifypositive2="www.totaljobs.com</get_current_url"
+    method="selenium"
+    command1="$selresp = $driver->find_element('search-button','id')->click();"
+/>
+
+<action
+    id="40"
+    description1="Click on London, South East then click Select button"
+    verifytext="get_body_text,get_current_url"
+    verifypositive1="Sorry! We have found more than one match for your location"
+    verifypositive2="<get_current_url1>http://www.totaljobs.com/JobSearch/LocationSelect.aspx"
+    method="selenium"
+    command1="$selresp = helper_select_by_text('lstLocationList','id','London, South East');"        
+    command2="$selresp = $driver->find_element('btnLocationListSearch','id')->click();"
+/>
+
+<goal
+    id="50"
+    description1="Check that Search Results page displayed"
+    verifytext="get_body_text,get_current_url"
+    verifypositive1="Automation Engineer jobs in London"
+    verifypositive2="<get_current_url1>http://www.totaljobs.com/jobs/automation-engineer/in-london_south-east"
+/>
+
+<fail
+    id="60"
+    description1="Should not show error page"
+    verifytext="get_body_text,get_current_url"
+    verifypositive1="Looks like we have a problem"
+    verifypositive2="Error.aspx"
+/>
+
+
+
+</testcases>
