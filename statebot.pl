@@ -329,11 +329,6 @@ sub substitute_variables {
 #------------------------------------------------------------------
 sub get_number_of_times_to_retry_this_test_step {
 
-    $case{retryfromstep} = $xml_test_cases->{case}->{$testnum}->{retryfromstep}; ## retry from a [previous] step
-    if ($case{retryfromstep}) { ## retryfromstep parameter found
-        return 0; ## we will not do a regular retry
-    }
-
     my $_retry;
     $case{retry} = $xml_test_cases->{case}->{$testnum}->{retry}; ## optional retry of a failed test case
     if ($case{retry}) { ## retry parameter found
@@ -463,9 +458,8 @@ sub execute_test_step {
 #------------------------------------------------------------------
 sub pass_fail_or_retry {
 
-    ## check max jumpbacks - globaljumpbacks - i.e. retryfromstep usages before we give up - otherwise we risk an infinite loop
-    if ( (($is_failure > 0) && ($retry < 1) && !($case{retryfromstep})) || (($is_failure > 0) && ($case{retryfromstep}) && ($jumpbacks > ($config{globaljumpbacks}-1) )) || ($fast_fail_invoked eq 'true')) {
-        ## if any verification fails, test case is considered a failure UNLESS there is at least one retry available, or it is a retryfromstep case
+    if ( ( ($is_failure > 0) && ($retry < 1) ) || ($fast_fail_invoked eq 'true') ) {
+        ## if any verification fails, test case is considered a failure UNLESS there is at least one retry available
         ## however if a verifynegative fails then the case is always a failure
         $results_xml .= qq|            <success>false</success>\n|;
         if ($case{errormessage}) { #Add defined error message to the output
@@ -498,36 +492,6 @@ sub pass_fail_or_retry {
         $globalretries++;
         $passed_count = $passed_count - $retry_passed_count;
         $failed_count = $failed_count - $retry_failed_count;
-    }
-    elsif (($is_failure > 0) && $case{retryfromstep}) {#Output message if we will retry the test case from step
-        my $_jump_backs_left = $config{globaljumpbacks} - $jumpbacks;
-        $results_html .= qq|<b><span class="pass">RETRYING FROM STEP $case{retryfromstep} ... $_jump_backs_left tries left</span></b><br />\n|;
-        $results_stdout .= qq|RETRYING FROM STEP $case{retryfromstep} ...  $_jump_backs_left tries left\n|;
-        $results_xml .= qq|            <success>false</success>\n|;
-        $results_xml .= qq|            <result-message>RETRYING FROM STEP $case{retryfromstep} ...  $_jump_backs_left tries left</result-message>\n|;
-        $jumpbacks++; ## increment number of times we have jumped back - i.e. used retryfromstep
-        $jumpbacks_print = "-$jumpbacks";
-        $globalretries++;
-        $passed_count = $passed_count - $retry_passed_count;
-        $failed_count = $failed_count - $retry_failed_count;
-
-        ## find the index for the test step we are retrying from
-        $step_index = 0;
-        my $_found_index = 'false';
-        foreach (@test_steps) {
-            if ($test_steps[$step_index] eq $case{retryfromstep}) {
-                $_found_index = 'true';
-                last;
-            }
-            $step_index++
-        }
-        if ($_found_index eq 'false') {
-            $results_stdout .= qq|ERROR - COULD NOT FIND STEP $case{retryfromstep} - TESTING STOPS \n|;
-        }
-        else
-        {
-            $step_index--; ## since we increment it at the start of the next loop / end of this loop
-        }
     }
     else {
         $results_html .= qq|<b><span class="pass">TEST CASE PASSED</span></b><br />\n|;
@@ -583,15 +547,8 @@ sub output_test_step_results {
 #------------------------------------------------------------------
 sub increment_run_count {
 
-    if ( ( ($is_failure > 0) && ($retry > 0) && !($case{retryfromstep}) ) ||
-         ( ($is_failure > 0) && $case{retryfromstep} && ($jumpbacks < $config{globaljumpbacks} ) && ($fast_fail_invoked eq 'false') )
-       ) {
-        ## do not count this in run count if we are retrying
-    }
-    else {
-        $run_count++;
-        $total_run_count++;
-    }
+    $run_count++;
+    $total_run_count++;
 
     return;
 }
@@ -632,24 +589,9 @@ sub restart_browser {
 #------------------------------------------------------------------
 sub sleep_before_next_step {
 
-    if ( (($is_failure < 1) && ($case{retry})) || (($is_failure < 1) && ($case{retryfromstep})) )
+    if ($case{sleep})
     {
-        ## ignore the sleep if the test case worked and it is a retry test case
-    }
-    else
-    {
-        if ($case{sleep})
-        {
-            if ( (($is_failure > 0) && ($retry < 1)) || (($is_failure > 0) && ($jumpbacks > ($config{globaljumpbacks}-1))) )
-            {
-                ## do not sleep if the test case failed and we have run out of retries or jumpbacks
-            }
-            else
-            {
-                ## if a sleep value is set in the test case, sleep that amount
-                sleep $case{sleep};
-            }
-        }
+        sleep $case{sleep};
     }
 
     return;
