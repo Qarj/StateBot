@@ -160,6 +160,7 @@ $results_stdout .= "-------------------------------------------------------\n";
 
 while (!$all_goals_reached && !$failure_condition_reached) {
     $testnum = determine_action_to_execute();
+    print "Execution action $testnum\n";
     if (!$testnum) { die "Nothing to do!\n\nSuggest adding an action with no pre-condition - e.g. Get home page\n"; }
 
     $testnum_display = get_testnum_display($testnum);
@@ -272,30 +273,37 @@ sub determine_action_to_execute {
 
 #    @test_steps = sort {$a<=>$b} keys %{$xml_test_cases->{case}};
 
+    my @actions = sort {$a<=>$b} keys %{$xml_test_cases->{action}};
+
     undef %state_info;
 
+    foreach my $_action ( @actions ) {
+        print "found action:$_action\n";
+    }
+
     my $_default_action;
-    foreach my $_action ( keys %{ $xml_test_cases->{action} } ) {
+    foreach my $_action_id ( @actions ) {
+        print "current action:$_action_id\n";
 
         my $_all_assertions_match = 0; # assume the current action is a match for the current state
-        if ( %{ $_action}{verifytext} ) {
-            my @_parse_verify = split /,/, %{ $_action}{verifytext} ;
+        if ( $xml_test_cases->{action}->{$_action_id}->{verifytext} ) {
+            my @_parse_verify = split /,/, $xml_test_cases->{action}->{$_action_id}->{verifytext} ;
             foreach (@_parse_verify) {
                 my $_verify_text = $_;
                 if (not $state_info{$_verify_text}) {
                     _get_selenium_info($_verify_text);
                 }
-                foreach my $_case_attribute ( sort keys %{ $_action } ) {
+                foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$_action_id} } ) {
                     if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' ) {
-                        $_all_assertions_match = $_all_assertions_match or _verify_positive(%{$_action}{$_case_attribute}, \$state_info{$_verify_text});
+                        $_all_assertions_match = $_all_assertions_match or _verify_positive($xml_test_cases->{action}->{$_action_id}->{$_case_attribute}, \$state_info{$_verify_text});
                     }
                 }
                 if ($_all_assertions_match) {
-                    return $_action;
+                    return $_action_id;
                 }
             }
         } else {
-            $_default_action = $_action; # if all else fails, we use the default action, which is also the starting point
+            $_default_action = $_action_id; # if all else fails, we use the default action, which is also the starting point
         }
     }
 
@@ -350,7 +358,7 @@ sub _verify_positive {
     return 0;
 }
 #------------------------------------------------------------------
-sub display_request_response {
+sub _get_selenium_info {
     my ($_verify_text) = @_;
 
     $results_stdout .= "$_\n";
