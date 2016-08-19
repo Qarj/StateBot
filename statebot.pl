@@ -286,6 +286,15 @@ sub determine_action_to_execute {
     foreach my $_action_id ( @actions ) {
         print "current action:$_action_id\n";
 
+# probably need to get all the selenium info first for the action (might lead to redundancy for verifypositive assertions)
+# then loop over the positive asserts
+#   then loop over the state infos
+# then loop over the verifynegatives
+#   looping over ther state infos again
+#
+# debugs! and lots of comments
+
+
         my $_all_assertions_match = 0; # assume the current action is a match for the current state
         if ( $xml_test_cases->{action}->{$_action_id}->{verifytext} ) {
             my @_parse_verify = split /,/, $xml_test_cases->{action}->{$_action_id}->{verifytext} ;
@@ -294,10 +303,17 @@ sub determine_action_to_execute {
                 if (not $state_info{$_verify_text}) {
                     _get_selenium_info($_verify_text);
                 }
+                # process *all* of the positive verifications first
                 foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$_action_id} } ) {
                     if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' ) {
-                        #$_all_assertions_match = $_all_assertions_match or _verify_positive(convert_back_var_variables(convert_back_xml($xml_test_cases->{action}->{$_action_id}->{$_case_attribute})), \$state_info{$_verify_text});
-                        $_all_assertions_match = $_all_assertions_match or _verify_positive($xml_test_cases->{action}->{$_action_id}->{$_case_attribute}, \$state_info{$_verify_text});
+                        $_all_assertions_match ||= _verify_positive($xml_test_cases->{action}->{$_action_id}->{$_case_attribute}, \$state_info{$_verify_text});
+                    }
+                }
+                # now process the negative verifications, if a positive assertion has failed this will not do much, and as soon as a negative fails, this will fall through fairly quickly
+                foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$_action_id} } ) {
+                    if ( (substr $_case_attribute, 0, 14) eq 'verifynegative' ) {
+                        print "looking at $_case_attribute, match value:$_all_assertions_match";
+                        $_all_assertions_match &&= _verify_negative($xml_test_cases->{action}->{$_action_id}->{$_case_attribute}, \$state_info{$_verify_text});
                     }
                 }
                 if ($_all_assertions_match) {
@@ -318,51 +334,57 @@ sub determine_action_to_execute {
 #------------------------------------------------------------------
 sub _verify_positive {
     my ($_assertion, $_state_text) = @_;
-    print "Processing assertion: $_assertion\n";
+    print "Processing positive assertion: $_assertion\n";
     convert_back_var_variables(convert_back_xml($_assertion));
 
-#    my $_verify_number = $_case_attribute; ## determine index verifypositive index
-#    $_verify_number =~ s/^verifypositive//g; ## remove verifypositive from string
-#    if (!$_verify_number) {$_verify_number = '0';} #In case of verifypositive, need to treat as 0
     my @_verifyparms = split /[|][|][|]/, $_assertion ; #index 0 contains the actual string to verify, 1 the message to show if the assertion fails, 2 the tag that it is a known issue
     if ($_verifyparms[2]) { ## assertion is being ignored due to known production bug or whatever
-#        $results_html .= qq|<span class="skip">Skipped Positive Verification $_verify_number - $_verifyparms[2]</span><br />\n|;
-#        $results_stdout .= "Skipped Positive Verification $_verify_number - $_verifyparms[2] \n";
         $assertion_skips++;
         $assertion_skips_message = $assertion_skips_message . '[' . $_verifyparms[2] . ']';
     }
     else {
-#        $results_xml .= "            <$_case_attribute>\n";
-#        $results_xml .= '                <assert>'._sub_xml_special($_verifyparms[0])."</assert>\n";
         if ( ${ $_state_text } =~ m/$_assertion/si) {  ## verify existence of string in state text
-#            $results_html .= qq|<span class="pass">Passed Positive Verification</span><br />\n|;
-#            $results_xml .= qq|                <success>true</success>\n|;
             print "Passed Positive Verification $_assertion\n";
-            #$results_stdout .= $_verify_number." Passed Positive Verification \n"; ##DEBUG
-#            $passed_count++;
-#            $retry_passed_count++;
             return 1;
         }
         else {
-#            $results_html .= qq|<span class="fail">Failed Positive Verification:</span>$_verifyparms[0]<br />\n|;
-#            $results_xml .= qq|                <success>false</success>\n|;
-#            if ($_verifyparms[1]) { ## is there a custom assertion failure message?
-#               $results_html .= qq|<span class="fail">$_verifyparms[1]</span><br />\n|;
-#               $results_xml .= '                <message>'._sub_xml_special($_verifyparms[1])."</message>\n";
-#             }
             print "Failed Positive Verification $_assertion\n";
             if ($_verifyparms[1]) {
                $results_stdout .= "$_verifyparms[1] \n";
             }
-#            $failed_count++;
-#            $retry_failed_count++;
-#            $is_failure++;
         }
-#        $results_xml .= qq|            </$_case_attribute>\n|;
     }
 
     return 0;
 }
+
+#------------------------------------------------------------------
+sub _verify_negative {
+    my ($_assertion, $_state_text) = @_;
+    print "Processing negative assertion: $_assertion\n";
+    convert_back_var_variables(convert_back_xml($_assertion));
+
+    my @_verifyparms = split /[|][|][|]/, $_assertion ; #index 0 contains the actual string to verify, 1 the message to show if the assertion fails, 2 the tag that it is a known issue
+    if ($_verifyparms[2]) { ## assertion is being ignored due to known production bug or whatever
+        $assertion_skips++;
+        $assertion_skips_message = $assertion_skips_message . '[' . $_verifyparms[2] . ']';
+    }
+    else {
+        if ( ${ $_state_text } =~ m/$_assertion/si) {  ## verify existence of string in state text
+            print "Failed Negative Verification $_assertion\n";
+            return 0;
+        }
+        else {
+            print "Passed Negative Verification $_assertion\n";
+            if ($_verifyparms[1]) {
+               $results_stdout .= "$_verifyparms[1] \n";
+            }
+        }
+    }
+
+    return 1;
+}
+
 #------------------------------------------------------------------
 sub _get_selenium_info {
     my ($_verify_text) = @_;

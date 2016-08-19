@@ -13,9 +13,10 @@
     description1="Type in search keywords and location"
     verifytext="get_body_text"
     verifypositive="Find your perfect job"
+    verifynegative="Automation Engineer"
     method="selenium"
     command1="$selresp = helper_clear_and_send_keys('keywords','id','Automation Engineer');"
-    command2="$selresp = helper_clear_and_send_keys('location','id','Test');"
+    command2="$selresp = helper_clear_and_send_keys('location','id','Lond');"
 />
 
 <action
