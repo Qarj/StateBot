@@ -85,13 +85,11 @@ $current_date_time = "$WEEKDAYS[$DAYOFWEEK] $DAYOFMONTH $MONTH_TEXT $YEAR, $HOUR
 my $this_script_folder_full = dirname(__FILE__);
 chdir $this_script_folder_full;
 
-my $counter = 0; ## keeping track of the loop we are up to
-
 my $concurrency = 'null'; ## current working directory - not full path
 my $png_base64; ## Selenium full page grab screenshot
 
 my ( $results_stdout, $results_html, $results_xml, $results_xml_file_name );
-my ($start_run_timer, $end_run_timer, $repeat, $start);
+my ($start_run_timer, $end_run_timer);
 
 my $hostname = `hostname`; ##no critic(ProhibitBacktickOperators) ## hostname should work on Linux and Windows
 $hostname =~ s/\r|\n//g; ## strip out any rogue linefeeds or carriage returns
@@ -130,22 +128,10 @@ $testfilename = fileparse($current_case_file, '.xml'); ## without extension
 read_test_case_file();
 #start_session(); #starts, or restarts the statebot session
 
-$repeat = $xml_test_cases->{repeat};  #grab the number of times to iterate test case file
-if (!$repeat) { $repeat = 1; }  #set to 1 in case it is not defined in test case file
-
-$start = $xml_test_cases->{start};  #grab the start for repeating (for restart)
-if (!$start) { $start = 1; }  #set to 1 in case it is not defined in test case file
-
-$counter = $start - 1; #so starting position and counter are aligned
-
 if ($opt_driver) { start_selenium_browser(); }  ## start selenium browser if applicable. If it is already started, close browser then start it again.
 
 $results_stdout .= "-------------------------------------------------------\n";
 
-## Repeat Loop
-foreach ($start .. $repeat) {
-
-    $counter = $counter + 1;
     $run_count = 0;
     $jumpbacks_print = q{}; ## we do not indicate a jump back until we actually jump back
     $jumpbacks = 0;
@@ -158,7 +144,7 @@ foreach ($start .. $repeat) {
 
         $testnum = $test_steps[$step_index];
 
-        $testnum_display = get_testnum_display($testnum, $counter);
+        $testnum_display = get_testnum_display($testnum);
 
         $is_failure = 0;
         $retries = 1; ## we increment retries after writing to the log
@@ -236,7 +222,6 @@ foreach ($start .. $repeat) {
     } ## end of test case loop
 
     $testnum = 1;  #reset testcase counter so it will reprocess test case file if repeat is set
-} ## end of repeat loop
 
 $end_run_timer = time;
 $total_run_time = (int(1000 * ($end_run_timer - $start_run_timer)) / 1000);  #elapsed time rounded to thousandths
@@ -266,10 +251,8 @@ sub display_request_response {
 }
 
 sub get_testnum_display {
-    my ($_testnum, $_counter) = @_;
+    my ($_testnum_display) = @_;
 
-    ## use $testnum_display for all testnum output, add 10,000 in case of repeat loop
-    my $_testnum_display = $_testnum + ($_counter*10_000) - 10_000;
     $_testnum_display = sprintf '%.2f', $_testnum_display; ## maximul of 2 decimal places
     $_testnum_display =~ s/0+\z// if $_testnum_display =~ /[.]/; ## remove trailing non significant zeros
     if (not ($_testnum_display =~ s/[.]\z//) ) { ## remove decimal point if nothing after
@@ -310,26 +293,6 @@ sub get_test_step_skip_message {
         }
         else {
             return "do not run on $case{donotrunon}";
-        }
-    }
-
-    $case{firstlooponly} = $xml_test_cases->{case}->{$testnum}->{firstlooponly}; ## only run this test case on the first loop
-    if ($case{firstlooponly}) { ## is the firstlooponly value set for this testcase?
-        if ($counter == 1) { ## counter keeps track of what loop number we are on
-            ## run this test case as normal since it is the first pass
-        }
-        else {
-              return 'firstlooponly';
-        }
-    }
-
-    $case{lastlooponly} = $xml_test_cases->{case}->{$testnum}->{lastlooponly}; ## only run this test case on the last loop
-    if ($case{lastlooponly}) { ## is the lastlooponly value set for this testcase?
-        if ($counter == $repeat) { ## counter keeps track of what loop number we are on
-            ## run this test case as normal since it is the first pass
-        }
-        else {
-              return 'lastlooponly';
         }
     }
 
@@ -2880,7 +2843,6 @@ sub convert_back_xml {  #converts replaced xml with substitutions
     $_[0] =~ s/{DATETIME}/$YEAR$MONTHS[$MONTH]$DAYOFMONTH$HOUR$MINUTE$SECOND/g;
     my $_underscore = '_';
     $_[0] =~ s{{FORMATDATETIME}}{$DAYOFMONTH\/$MONTHS[$MONTH]\/$YEAR$_underscore$HOUR:$MINUTE:$SECOND}g;
-    $_[0] =~ s/{COUNTER}/$counter/g;
     $_[0] =~ s/{CONCURRENCY}/$concurrency/g; #name of the temporary folder being used - not full path
     $_[0] =~ s/{OUTPUT}/$output/g;
     $_[0] =~ s/{PUBLISH}/$opt_publish_full/g;
