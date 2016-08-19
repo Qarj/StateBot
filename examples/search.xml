@@ -41,6 +41,7 @@
 
 <goal
     id="1"
+    name="SEARCH_RESULTS"
     description1="Check that Search Results page displayed"
     verifytext="get_body_text,get_current_url"
     verifypositive1="Automation Engineer jobs in London"

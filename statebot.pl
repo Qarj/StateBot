@@ -37,7 +37,7 @@ my (%test_step_time); ## record in a hash the latency for every step for later u
 my ($cookie_jar, @http_auth);
 my ($run_count, $total_run_count, $case_passed_count, $case_failed_count, $passed_count, $failed_count);
 my ($total_response, $avg_response, $max_response, $min_response);
-my ($current_case_file, $current_case_filename, $case_count, $is_failure, $fast_fail_invoked);
+my ($current_case_file, $current_case_filename, $action_count, $is_failure, $fast_fail_invoked);
 my (%case, %case_save);
 my (%config);
 my ($current_date_time, $total_run_time, $start_timer, $end_timer);
@@ -131,6 +131,17 @@ read_test_case_file();
 if ($opt_driver) { start_selenium_browser(); }  ## start selenium browser if applicable. If it is already started, close browser then start it again.
 
 $results_stdout .= "-------------------------------------------------------\n";
+
+# Main Loop
+#
+# - determine which action to execute based on current state
+# - execute that action
+# - check if any goals have been reached, if so report success and increment number of times that goal has been reached
+# - check if all goals have been reached at least once, if so report success and end execution
+# - check if a failure condition has been reached, if so report failure and end execution
+#       UNLESS there is a retry parameter present on that condition - if so, increment number of times condition has failed
+#           check if maximum number of retries has been reached for that condition, if so report failure and end execution    
+#
 
     $run_count = 0;
     $jumpbacks_print = q{}; ## we do not indicate a jump back until we actually jump back
@@ -2663,14 +2674,14 @@ sub read_test_case_file {
     while ( $_xml =~ s/\w\s*=\s*'[^']*\K<(?!case)([^']*')/{LESSTHAN}$1/sg ) {}
     #$_xml =~ s/\\</{LESSTHAN}/g;
 
-    $case_count = 0;
-    while ($_xml =~ /<case/g) {  #count test cases based on '<case' tag
-        $case_count++;
+    $action_count = 0;
+    while ($_xml =~ /<action/g) {  #count actions based on '<action' tag
+        $action_count++;
     }
 
-    if ($case_count == 1) {
-        $_xml =~ s/<\/testcases>/<case id="99999999" description1="dummy test case"\/><\/testcases>/;  #add dummy test case to end of file
-    }
+#    if ($action_count == 1) {
+#        $_xml =~ s/<\/testcases>/<case id="99999999" description1="dummy test case"\/><\/testcases>/;  #add dummy test case to end of file
+#    }
 
     # see the final test case file after all alerations for debug purposes
     #write_file('final_test_case_file_'.int(rand(999)).'.xml', $_xml);
