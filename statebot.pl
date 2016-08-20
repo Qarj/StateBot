@@ -160,7 +160,7 @@ print "-------------------------------------------------------\n";
 
 while (!$all_goals_reached && !$failure_condition_reached) {
     $testnum = determine_action_to_execute();
-    print "Execution action $testnum\n";
+    print "Executing action $testnum\n";
     if (!$testnum) { die "Nothing to do!\n\nSuggest adding an action with no pre-condition - e.g. Get home page\n"; }
 
     $testnum_display = get_testnum_display($testnum);
@@ -295,32 +295,46 @@ sub determine_action_to_execute {
 # debugs! and lots of comments
 
 
-        my $_all_assertions_match = 0; # assume the current action is a match for the current state
+        my $_all_assertions_match = 1; # assume that all the assertions match for this action, until proven otherwise
         if ( $xml_test_cases->{action}->{$_action_id}->{verifytext} ) {
-            my @_parse_verify = split /,/, $xml_test_cases->{action}->{$_action_id}->{verifytext} ;
+            my @_parse_verify = split /[|]/, $xml_test_cases->{action}->{$_action_id}->{verifytext} ;
+
+            # First buffer all of the verify text in %state_info
             foreach (@_parse_verify) {
-                my $_verify_text = $_;
-                if (not $state_info{$_verify_text}) {
-                    _get_selenium_info($_verify_text);
-                }
-                # process *all* of the positive verifications first
-                foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$_action_id} } ) {
-                    if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' ) {
-                        $_all_assertions_match ||= _verify_positive($xml_test_cases->{action}->{$_action_id}->{$_case_attribute}, \$state_info{$_verify_text});
-                    }
-                }
-                # now process the negative verifications, if a positive assertion has failed this will not do much, and as soon as a negative fails, this will fall through fairly quickly
-                foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$_action_id} } ) {
-                    if ( (substr $_case_attribute, 0, 14) eq 'verifynegative' ) {
-                        print "looking at $_case_attribute, match value:$_all_assertions_match";
-                        $_all_assertions_match &&= _verify_negative($xml_test_cases->{action}->{$_action_id}->{$_case_attribute}, \$state_info{$_verify_text});
-                    }
-                }
-                if ($_all_assertions_match) {
-                    print "All assertions match for $_action_id\n";
-                    return $_action_id;
+                if (not $state_info{$_}) {
+                    _get_selenium_info($_);
                 }
             }
+
+            # process *all* of the positive verifications first
+            foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$_action_id} } ) {
+                if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' ) {
+                    my $_positive_assertion_ok = 0;
+                    foreach (@_parse_verify) {
+                        # the positive assertion will pass so long as it is found in one of the state info fields
+                        $_positive_assertion_ok ||= _verify_positive($xml_test_cases->{action}->{$_action_id}->{$_case_attribute}, \$state_info{$_});
+                    }
+                    $_all_assertions_match &&= $_positive_assertion_ok;
+                }
+            }
+ 
+            # now process the negative verifications, if a positive assertion has failed this will not do much, and as soon as a negative fails, this will fall through fairly quickly
+            foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$_action_id} } ) {
+                if ( (substr $_case_attribute, 0, 14) eq 'verifynegative' ) {
+                    print "looking at $_case_attribute, match value:$_all_assertions_match\n";
+                    foreach (@_parse_verify) {
+                        # as soon as one negative assertion fails against one of the state info fields, all bets are off
+                        print "...Checking $_:\n";
+                        $_all_assertions_match &&= _verify_negative($xml_test_cases->{action}->{$_action_id}->{$_case_attribute}, \$state_info{$_});
+                    }
+                }
+            }
+
+            if ($_all_assertions_match) {
+                print "All assertions match for $_action_id\n";
+                return $_action_id;
+            }
+
         } else {
             $_default_action = $_action_id; # if all else fails, we use the default action, which is also the starting point
         }
@@ -361,6 +375,8 @@ sub _verify_positive {
 #------------------------------------------------------------------
 sub _verify_negative {
     my ($_assertion, $_state_text) = @_;
+    print ${ $_state_text };
+    print "\n\n\n\n";
     print "Processing negative assertion: $_assertion\n";
     convert_back_var_variables(convert_back_xml($_assertion));
 
@@ -389,14 +405,25 @@ sub _verify_negative {
 sub _get_selenium_info {
     my ($_verify_text) = @_;
 
-    $results_stdout .= "$_\n";
+    print "_get_selenium_info::$_verify_text\n";
     my @_verify_response;
 
+    # need another - text(target,locator):
+    # $driver->find_element("$_search_target", "$_locator")->get_text();
     if ($_verify_text eq 'get_body_text') {
         eval { @_verify_response =  $driver->find_element('body','tag_name')->get_text(); };
+    } elsif ( (substr $_verify_text,0,4) eq 'text') {
+        my @_parms = split /:/, $_verify_text;
+        if (not $_parms[2]) { $_parms[2] = 'id'; }
+        print "\n\n\n\n\n\n-->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>$_parms[1],$_parms[2]\n\n\n\n\n\n";
+        sleep 1;
+        eval { @_verify_response =  $driver->find_element($_parms[1],$_parms[2])->get_text(); };
+        print "GOT:$_verify_response[0]\n";
     } else {
-        eval { @_verify_response = $driver->$_(); }; ## sometimes Selenium will return an array
+        eval { @_verify_response = $driver->$_verify_text(); }; ## sometimes Selenium will return an array
     }
+
+# looks like javascript will be needed to get the value entered into a text box
 
     my $_idx = 0;
     foreach my $_vresp (@_verify_response) {
