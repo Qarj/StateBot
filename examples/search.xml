@@ -11,23 +11,20 @@
 <action
     id="20"
     description1="Type in search keywords and location"
-    verifytext="get_body_text|text:keywords:id"
+    verifytext="get_body_text|value:keywords"
     verifypositive="Find your perfect job"
     verifynegative="Automation Engineer"
     method="selenium"
     command1="$selresp = helper_clear_and_send_keys('keywords','id','Automation Engineer');"
     command2="$selresp = helper_clear_and_send_keys('location','id','Lond');"
-    command3="$selresp = $driver->find_element('keywords','id')->get_text();"
-    command4="$selresp = helper_wait_for_text_visible('Automation', 'keywords', 'id', 2);"
-    command5="$selresp = $driver->find_element('keywords','id')->get_text();"
 />
 
 <action
     id="30"
     description1="Click Search button on Homepage"
-    verifytext="get_body_text|get_active_element|get_current_url|text:keywords:id"
+    verifytext="get_body_text|get_current_url|value:keywords"
     verifypositive1="Automation Engineer"
-    verifypositive2="www.totaljobs.com</get_current_url"
+    verifypositive2="www.totaljobs.com/</get_current_url"
     method="selenium"
     command1="$selresp = $driver->find_element('search-button','id')->click();"
 />

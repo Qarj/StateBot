@@ -284,7 +284,7 @@ sub determine_action_to_execute {
 
     my $_default_action;
     foreach my $_action_id ( @actions ) {
-        print "current action:$_action_id\n";
+        print "checking action:$_action_id\n";
 
 # probably need to get all the selenium info first for the action (might lead to redundancy for verifypositive assertions)
 # then loop over the positive asserts
@@ -302,7 +302,10 @@ sub determine_action_to_execute {
             # First buffer all of the verify text in %state_info
             foreach (@_parse_verify) {
                 if (not $state_info{$_}) {
+                    print "   Need to retrieve $_ state\n";
                     _get_selenium_info($_);
+                } else {
+                    print "   Already have $_ state\n";
                 }
             }
 
@@ -311,6 +314,7 @@ sub determine_action_to_execute {
                 if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' ) {
                     my $_positive_assertion_ok = 0;
                     foreach (@_parse_verify) {
+                        print "      [$_]\n";
                         # the positive assertion will pass so long as it is found in one of the state info fields
                         $_positive_assertion_ok ||= _verify_positive($xml_test_cases->{action}->{$_action_id}->{$_case_attribute}, \$state_info{$_});
                     }
@@ -321,17 +325,17 @@ sub determine_action_to_execute {
             # now process the negative verifications, if a positive assertion has failed this will not do much, and as soon as a negative fails, this will fall through fairly quickly
             foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$_action_id} } ) {
                 if ( (substr $_case_attribute, 0, 14) eq 'verifynegative' ) {
-                    print "looking at $_case_attribute, match value:$_all_assertions_match\n";
+                    #print "looking at $_case_attribute, match value:$_all_assertions_match\n";
                     foreach (@_parse_verify) {
                         # as soon as one negative assertion fails against one of the state info fields, all bets are off
-                        print "...Checking $_:\n";
+                        print "      [$_]:\n";
                         $_all_assertions_match &&= _verify_negative($xml_test_cases->{action}->{$_action_id}->{$_case_attribute}, \$state_info{$_});
                     }
                 }
             }
 
             if ($_all_assertions_match) {
-                print "All assertions match for $_action_id\n";
+                print "   All assertions match for $_action_id\n";
                 return $_action_id;
             }
 
@@ -340,7 +344,8 @@ sub determine_action_to_execute {
         }
     }
 
-    print "No action passes assertions\n";
+    print "   No action passes assertions\n";
+    sleep 3;
     return $_default_action; # will be null if no action found
 }
 
@@ -348,8 +353,9 @@ sub determine_action_to_execute {
 #------------------------------------------------------------------
 sub _verify_positive {
     my ($_assertion, $_state_text) = @_;
-    print "Processing positive assertion: $_assertion\n";
+    #print "         Processing positive assertion RAW: $_assertion\n";
     convert_back_var_variables(convert_back_xml($_assertion));
+    print "         Processing positive assertion    : $_assertion\n";
 
     my @_verifyparms = split /[|][|][|]/, $_assertion ; #index 0 contains the actual string to verify, 1 the message to show if the assertion fails, 2 the tag that it is a known issue
     if ($_verifyparms[2]) { ## assertion is being ignored due to known production bug or whatever
@@ -358,14 +364,11 @@ sub _verify_positive {
     }
     else {
         if ( ${ $_state_text } =~ m/$_assertion/si) {  ## verify existence of string in state text
-            print "Passed Positive Verification $_assertion\n";
+            print "            Passed Positive Verification $_assertion\n";
             return 1;
         }
         else {
-            print "Failed Positive Verification $_assertion\n";
-            if ($_verifyparms[1]) {
-               $results_stdout .= "$_verifyparms[1] \n";
-            }
+            print "           Failed Positive Verification $_assertion\n";
         }
     }
 
@@ -375,10 +378,11 @@ sub _verify_positive {
 #------------------------------------------------------------------
 sub _verify_negative {
     my ($_assertion, $_state_text) = @_;
-    print ${ $_state_text };
-    print "\n\n\n\n";
-    print "Processing negative assertion: $_assertion\n";
+    #print ${ $_state_text };
+    #print "\n\n\n\n";
+    #print "Processing negative assertion: $_assertion\n";
     convert_back_var_variables(convert_back_xml($_assertion));
+    print "         Processing negative assertion    : $_assertion\n";
 
     my @_verifyparms = split /[|][|][|]/, $_assertion ; #index 0 contains the actual string to verify, 1 the message to show if the assertion fails, 2 the tag that it is a known issue
     if ($_verifyparms[2]) { ## assertion is being ignored due to known production bug or whatever
@@ -387,14 +391,11 @@ sub _verify_negative {
     }
     else {
         if ( ${ $_state_text } =~ m/$_assertion/si) {  ## verify existence of string in state text
-            print "Failed Negative Verification $_assertion\n";
+            print "           Failed Negative Verification $_assertion\n";
             return 0;
         }
         else {
-            print "Passed Negative Verification $_assertion\n";
-            if ($_verifyparms[1]) {
-               $results_stdout .= "$_verifyparms[1] \n";
-            }
+            print "            Passed Negative Verification $_assertion\n";
         }
     }
 
@@ -405,20 +406,30 @@ sub _verify_negative {
 sub _get_selenium_info {
     my ($_verify_text) = @_;
 
-    print "_get_selenium_info::$_verify_text\n";
+    print "      _get_selenium_info::$_verify_text\n";
     my @_verify_response;
 
     # need another - text(target,locator):
     # $driver->find_element("$_search_target", "$_locator")->get_text();
     if ($_verify_text eq 'get_body_text') {
         eval { @_verify_response =  $driver->find_element('body','tag_name')->get_text(); };
-    } elsif ( (substr $_verify_text,0,4) eq 'text') {
+    } elsif ( (substr $_verify_text,0,4) eq 'text') { #text:keywords:id
         my @_parms = split /:/, $_verify_text;
         if (not $_parms[2]) { $_parms[2] = 'id'; }
-        print "\n\n\n\n\n\n-->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>$_parms[1],$_parms[2]\n\n\n\n\n\n";
+        #print "\n\n\n\n\n\n-->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>$_parms[1],$_parms[2]\n\n\n\n\n\n";
         sleep 1;
         eval { @_verify_response =  $driver->find_element($_parms[1],$_parms[2])->get_text(); };
-        print "GOT:$_verify_response[0]\n";
+        #print "GOT:$_verify_response[0]\n";
+    } elsif ( (substr $_verify_text,0,5) eq 'value') { # value:keywords
+        my @_id_to_get_value = split /:/, $_verify_text;
+        #print "\n\n\n\n\n\n-->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>$_id_to_get_value[0],$_id_to_get_value[1]\n\n\n\n\n\n";
+        sleep 1;
+        my $_script = q{
+            var arg1 = arguments[0];
+            var text = window.document.getElementById(arg1).value;
+            return text;
+        };
+        @_verify_response = $driver->execute_script($_script,$_id_to_get_value[1]);
     } else {
         eval { @_verify_response = $driver->$_verify_text(); }; ## sometimes Selenium will return an array
     }
@@ -442,6 +453,10 @@ sub _get_selenium_info {
     if (not $state_info{$_verify_text}) {
         $state_info{$_verify_text} = 'NULL';
     }
+
+    print "      populated state info --- START ---\n";
+    print $state_info{$_verify_text};
+    print "      populated state info ---  END  ---\n";
 
     return;
 }
