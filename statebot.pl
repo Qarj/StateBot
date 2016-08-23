@@ -8,7 +8,7 @@ use strict;
 use warnings;
 use vars qw/ $VERSION /;
 
-$VERSION = '0.1.0';
+$VERSION = '0.2.0';
 
 #    StateBot is an experiment based upon the WebInject 2 code base
 
@@ -35,7 +35,7 @@ my ($useragent, $request, $response);
 my ($latency, $verification_latency, $screenshot_latency);
 my (%test_step_time); ## record in a hash the latency for every step for later use
 my ($cookie_jar, @http_auth);
-my ($run_count, $total_run_count, $case_passed_count, $case_failed_count, $passed_count, $failed_count);
+my ($total_run_count, $case_passed_count, $case_failed_count, $passed_count, $failed_count);
 my ($total_response, $avg_response, $max_response, $min_response);
 my ($current_case_file, $current_case_filename, $action_count, $is_failure, $fast_fail_invoked);
 my (%case, %case_save);
@@ -97,6 +97,7 @@ my $is_windows = $^O eq 'MSWin32' ? 1 : 0;
 
 my ($all_goals_reached, $failure_condition_reached);
 my (%state_info);
+my ($default_action_id);
 
 ## Startup
 get_options();  #get command line options
@@ -134,9 +135,10 @@ if ($opt_driver) { start_selenium_browser(); }  ## start selenium browser if app
 
 print "-------------------------------------------------------\n";
 
-    $run_count = 0;
     $jumpbacks_print = q{}; ## we do not indicate a jump back until we actually jump back
     $jumpbacks = 0;
+
+my @actions = sort {$a<=>$b} keys %{$xml_test_cases->{action}};
 
 # Main Loop
 #
@@ -161,7 +163,6 @@ print "-------------------------------------------------------\n";
 while (!$all_goals_reached && !$failure_condition_reached) {
     $testnum = determine_action_to_execute();
     print "Executing action $testnum\n";
-    if (!$testnum) { die "Nothing to do!\n\nSuggest adding an action with no pre-condition - e.g. Get home page\n"; }
 
     $testnum_display = get_testnum_display($testnum);
 
@@ -171,24 +172,11 @@ while (!$all_goals_reached && !$failure_condition_reached) {
 
     set_useragent($xml_test_cases->{action}->{$testnum}->{useragent});
 
-    my $skip_message = get_test_step_skip_message();
-    if ( $skip_message ) {
-        $results_stdout .= "Skipping Test Case $testnum... ($skip_message)\n";
-        $results_stdout .= qq|------------------------------------------------------- \n|;
-        next TESTCASE; ## skip running this test step
-    }
-
     # populate variables with values from testcase file, do substitutions, and revert converted values back
-
-#   $retry = get_number_of_times_to_retry_this_test_step(); # 0 means do not retry this step
 
     substitute_variables();
     set_var_variables(); ## finally set any variables after doing all the static and dynamic substitutions
     substitute_var_variables();
-
-#   substitute_retry_variables(); ## for each retry, there are a few substitutions that we need to redo - like the retry number
-
-    set_retry_to_zero_if_global_limit_exceeded();
 
     $is_failure = 0;
     $fast_fail_invoked = 'false';
@@ -200,14 +188,11 @@ while (!$all_goals_reached && !$failure_condition_reached) {
     }
 
     output_test_step_description();
-    output_assertions();
 
     execute_test_step();
     display_request_response();
 
     decode_quoted_printable();
-
-#    verify(); #verify result from http response
 
     gethrefs(); ## get specified web page href assets
     getsrcs(); ## get specified web page src assets
@@ -217,12 +202,10 @@ while (!$all_goals_reached && !$failure_condition_reached) {
 
     httplog();  #write to http.txt file
 
-#    pass_fail_or_retry();
-
     output_test_step_latency();
     output_test_step_results();
 
-    increment_run_count();
+    $total_run_count++;
     update_latency_statistics();
 
     restart_browser();
@@ -236,8 +219,6 @@ while (!$all_goals_reached && !$failure_condition_reached) {
     if (!$all_goals_reached) {
 #        $failure_condition_reached = check_if_failure_conditon_reached();
     }
-
-#    $retry = $retry - 1;
 
 } ## end of while loop
 
@@ -260,102 +241,131 @@ exit $status;
 
 sub determine_action_to_execute {
 
+# If no steps yet executed
+#     determine what the default action is (save in global)
+#     RETURN default action
+#     DIE if no default action
+
+    if (not $total_run_count) {
+        $default_action_id = _determine_default_action_id();
+        if ($default_action_id) {
+            return $default_action_id;
+        } else {
+            die "Nothing to do!\n\nSuggest adding an action with no pre-condition - e.g. Get home page\n";
+        }
+    }
+        
 # Iterate over actions
 #     For each verify-text
-#         Call Selenium to get the verify-text data UNLESS we already if it
+#         Call Selenium to get the verify-text data UNLESS we already have it
 #         For each assertion
 #             Check if met - for positive assertions - only once, for negative - must always pass
-#     If all assertions met, chosen action is returned
-#     If action has no assertion, we make a note of it
+#     If all assertions met (must have at least one assertion), RETURN chosen action
 #
-# Return the action with no assertion (start / default re-start point)
-#
-# Return null - no action found
-
-#    @test_steps = sort {$a<=>$b} keys %{$xml_test_cases->{action}};
-
-    my @actions = sort {$a<=>$b} keys %{$xml_test_cases->{action}};
+# RETURN the default action
 
     undef %state_info;
 
-    foreach my $_action ( @actions ) {
-        print "found action:$_action\n";
-    }
+    #foreach my $_action ( @actions ) {
+    #    print "found action:$_action\n";
+    #}
 
-    my $_default_action;
     foreach my $_action_id ( @actions ) {
-        print "checking action:$_action_id\n";
+        #print "checking action:$_action_id\n";
 
-# probably need to get all the selenium info first for the action (might lead to redundancy for verifypositive assertions)
-# then loop over the positive asserts
-#   then loop over the state infos
-# then loop over the verifynegatives
-#   looping over ther state infos again
-#
-# debugs! and lots of comments
-
-
-        my $_all_assertions_match = 1; # assume that all the assertions match for this action, until proven otherwise
-        if ( $xml_test_cases->{action}->{$_action_id}->{verifytext} ) {
-            my @_parse_verify = split /[|]/, $xml_test_cases->{action}->{$_action_id}->{verifytext} ;
-
-            # First buffer all of the verify text in %state_info
-            foreach (@_parse_verify) {
-                if (not $state_info{$_}) {
-                    print "   Need to retrieve $_ state\n";
-                    _get_selenium_info($_);
-                } else {
-                    print "   Already have $_ state\n";
-                }
-            }
-
-            # process *all* of the positive verifications first
-            foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$_action_id} } ) {
-                if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' ) {
-                    my $_positive_assertion_ok = 0;
-                    foreach (@_parse_verify) {
-                        print "      [$_]\n";
-                        # the positive assertion will pass so long as it is found in one of the state info fields
-                        $_positive_assertion_ok ||= _verify_positive($xml_test_cases->{action}->{$_action_id}->{$_case_attribute}, \$state_info{$_});
-                    }
-                    $_all_assertions_match &&= $_positive_assertion_ok;
-                }
-            }
- 
-            # now process the negative verifications, if a positive assertion has failed this will not do much, and as soon as a negative fails, this will fall through fairly quickly
-            foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$_action_id} } ) {
-                if ( (substr $_case_attribute, 0, 14) eq 'verifynegative' ) {
-                    #print "looking at $_case_attribute, match value:$_all_assertions_match\n";
-                    foreach (@_parse_verify) {
-                        # as soon as one negative assertion fails against one of the state info fields, all bets are off
-                        print "      [$_]:\n";
-                        $_all_assertions_match &&= _verify_negative($xml_test_cases->{action}->{$_action_id}->{$_case_attribute}, \$state_info{$_});
-                    }
-                }
-            }
-
-            if ($_all_assertions_match) {
-                print "   All assertions match for $_action_id\n";
-                return $_action_id;
-            }
-
-        } else {
-            $_default_action = $_action_id; # if all else fails, we use the default action, which is also the starting point
+        if ( _check_assertions('action', $_action_id) ) {
+            return $_action_id;
         }
+
     }
 
     print "   No action passes assertions\n";
     sleep 3;
-    return $_default_action; # will be null if no action found
+    return $default_action_id; # will be null if no action found
 }
 
+#------------------------------------------------------------------
+sub _check_assertions {
+    my ($_tag, $_id) = @_;
+
+    my @_parse_verify;
+    my $_all_assertions_match = 1; # assume that all the assertions match for this action, until proven otherwise
+    if ( $xml_test_cases->{$_tag}->{$_id}->{verifytext} ) {
+        @_parse_verify = split /[|]/, $xml_test_cases->{$_tag}->{$_id}->{verifytext};
+    } else {
+        return 0; # must have a state object to assert against
+    }
+
+    # First buffer all of the verify text in %state_info
+    foreach (@_parse_verify) {
+        if (not $state_info{$_}) {
+            #print "   Need to retrieve $_ state\n";
+            _get_selenium_info($_);
+        } else {
+            #print "   Already have $_ state\n";
+        }
+    }
+
+    # process *all* of the positive verifications first
+    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{$_tag}->{$_id} } ) {
+        if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' ) {
+            my $_positive_assertion_ok = 0;
+            foreach (@_parse_verify) {
+                #print "      [$_]\n";
+                # the positive assertion will pass so long as it is found in one of the state info fields
+                $_positive_assertion_ok ||= _verify_positive($xml_test_cases->{$_tag}->{$_id}->{$_case_attribute}, \$state_info{$_});
+            }
+            $_all_assertions_match &&= $_positive_assertion_ok;
+        }
+    }
+
+    # now process the negative verifications, if a positive assertion has failed this will not do much, and as soon as a negative fails, this will fall through fairly quickly
+    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{$_tag}->{$_id} } ) {
+        if ( (substr $_case_attribute, 0, 14) eq 'verifynegative' ) {
+            #print "looking at $_case_attribute, match value:$_all_assertions_match\n";
+            foreach (@_parse_verify) {
+                # as soon as one negative assertion fails against one of the state info fields, all bets are off
+                #print "      [$_]:\n";
+                $_all_assertions_match &&= _verify_negative($xml_test_cases->{$_tag}->{$_id}->{$_case_attribute}, \$state_info{$_});
+            }
+        }
+    }
+
+    if ($_all_assertions_match) {
+        print "   All assertions match for $_tag $_id\n";
+        return 1;
+    }
+
+    return 0; # not a match
+}
+
+#------------------------------------------------------------------
+sub _determine_default_action_id {
+
+    foreach my $_action_id ( @actions ) {
+        my $_found_default = 1; ## assume the current action is the default
+        foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$_action_id} } ) {
+            if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' ) {
+                undef $_found_default;
+            }
+            if ( (substr $_case_attribute, 0, 14) eq 'verifynegative' ) {
+                undef $_found_default;
+            }
+            if ($_found_default) {
+                return $_action_id;
+            }
+        } # next case attribute
+    } # next action
+
+    return;
+}
 
 #------------------------------------------------------------------
 sub _verify_positive {
     my ($_assertion, $_state_text) = @_;
     #print "         Processing positive assertion RAW: $_assertion\n";
     convert_back_var_variables(convert_back_xml($_assertion));
-    print "         Processing positive assertion    : $_assertion\n";
+    #print "         Processing positive assertion    : $_assertion\n";
 
     my @_verifyparms = split /[|][|][|]/, $_assertion ; #index 0 contains the actual string to verify, 1 the message to show if the assertion fails, 2 the tag that it is a known issue
     if ($_verifyparms[2]) { ## assertion is being ignored due to known production bug or whatever
@@ -364,11 +374,11 @@ sub _verify_positive {
     }
     else {
         if ( ${ $_state_text } =~ m/$_assertion/si) {  ## verify existence of string in state text
-            print "            Passed Positive Verification $_assertion\n";
+            #print "            Passed Positive Verification $_assertion\n";
             return 1;
         }
         else {
-            print "           Failed Positive Verification $_assertion\n";
+            #print "           Failed Positive Verification $_assertion\n";
         }
     }
 
@@ -382,7 +392,7 @@ sub _verify_negative {
     #print "\n\n\n\n";
     #print "Processing negative assertion: $_assertion\n";
     convert_back_var_variables(convert_back_xml($_assertion));
-    print "         Processing negative assertion    : $_assertion\n";
+    #print "         Processing negative assertion    : $_assertion\n";
 
     my @_verifyparms = split /[|][|][|]/, $_assertion ; #index 0 contains the actual string to verify, 1 the message to show if the assertion fails, 2 the tag that it is a known issue
     if ($_verifyparms[2]) { ## assertion is being ignored due to known production bug or whatever
@@ -391,11 +401,11 @@ sub _verify_negative {
     }
     else {
         if ( ${ $_state_text } =~ m/$_assertion/si) {  ## verify existence of string in state text
-            print "           Failed Negative Verification $_assertion\n";
+            #print "           Failed Negative Verification $_assertion\n";
             return 0;
         }
         else {
-            print "            Passed Negative Verification $_assertion\n";
+            #print "            Passed Negative Verification $_assertion\n";
         }
     }
 
@@ -406,7 +416,7 @@ sub _verify_negative {
 sub _get_selenium_info {
     my ($_verify_text) = @_;
 
-    print "      _get_selenium_info::$_verify_text\n";
+    #print "      _get_selenium_info::$_verify_text\n";
     my @_verify_response;
 
     # need another - text(target,locator):
@@ -417,13 +427,13 @@ sub _get_selenium_info {
         my @_parms = split /:/, $_verify_text;
         if (not $_parms[2]) { $_parms[2] = 'id'; }
         #print "\n\n\n\n\n\n-->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>$_parms[1],$_parms[2]\n\n\n\n\n\n";
-        sleep 1;
+        #sleep 1;
         eval { @_verify_response =  $driver->find_element($_parms[1],$_parms[2])->get_text(); };
         #print "GOT:$_verify_response[0]\n";
     } elsif ( (substr $_verify_text,0,5) eq 'value') { # value:keywords
         my @_id_to_get_value = split /:/, $_verify_text;
         #print "\n\n\n\n\n\n-->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>$_id_to_get_value[0],$_id_to_get_value[1]\n\n\n\n\n\n";
-        sleep 1;
+        #sleep 1;
         my $_script = q{
             var arg1 = arguments[0];
             var text = window.document.getElementById(arg1).value;
@@ -454,9 +464,9 @@ sub _get_selenium_info {
         $state_info{$_verify_text} = 'NULL';
     }
 
-    print "      populated state info --- START ---\n";
-    print $state_info{$_verify_text};
-    print "      populated state info ---  END  ---\n";
+    #print "      populated state info --- START ---\n";
+    #print $state_info{$_verify_text};
+    #print "      populated state info ---  END  ---\n";
 
     return;
 }
@@ -497,32 +507,6 @@ sub set_useragent {
 }
 
 #------------------------------------------------------------------
-sub get_test_step_skip_message {
-
-    $case{runon} = $xml_test_cases->{action}->{$testnum}->{runon}; ## skip test cases not flagged for this environment
-    if ($case{runon}) { ## is this test step conditional on the target environment?
-        if ( _run_this_step($case{runon}) ) {
-            ## run this test case as normal since it is allowed
-        }
-        else {
-            return "run on $case{runon}";
-        }
-    }
-
-    $case{donotrunon} = $xml_test_cases->{action}->{$testnum}->{donotrunon}; ## skip test cases flagged not to run on this environment
-    if ($case{donotrunon}) { ## is this test step conditional on the target environment?
-        if ( not _run_this_step($case{donotrunon}) ) {
-            ## run this test case as normal since it is allowed
-        }
-        else {
-            return "do not run on $case{donotrunon}";
-        }
-    }
-
-    return;
-}
-
-#------------------------------------------------------------------
 sub substitute_variables {
 
     ## "method", "description1", "description2", "url", "postbody", "posttype", "addheader", "command", "command1", ... "command20", "parms", "verifytext",
@@ -531,70 +515,17 @@ sub substitute_variables {
     ## "parseresponse", "parseresponse1", ... , "parseresponse40", ... , "parseresponse9999", "parseresponseORANYTHING", "verifyresponsecode",
     ## "verifyresponsetime", "sleep", "errormessage", "ignorehttpresponsecode", "ignoreautoassertions", "ignoresmartassertions",
     ## "retry", "logastext", "section", "assertcount", "searchimage", ... "searchimage5", "formatxml", "formatjson",
-    ## "logresponseasfile", "addcookie", "restartbrowseronfail", "restartbrowser", "commandonerror", "gethrefs", "getsrcs", "getbackgroundimages",
-    ## "firstlooponly", "lastlooponly", "decodequotedprintable"
+    ## "logresponseasfile", "addcookie", "restartbrowser", "commandonerror", "gethrefs", "getsrcs", "getbackgroundimages",
+    ## "decodequotedprintable"
 
     $timestamp = time;  #used to replace parsed {timestamp} with real timestamp value
 
-    undef %case_save; ## we need a clean array for each test case
     undef %case; ## do not allow values from previous test cases to bleed over
     foreach my $_case_attribute ( keys %{ $xml_test_cases->{action}->{$testnum} } ) {
         #print "DEBUG: $_case_attribute", ": ", $xml_test_cases->{action}->{$testnum}->{$_case_attribute};
         #print "\n";
         $case{$_case_attribute} = $xml_test_cases->{action}->{$testnum}->{$_case_attribute};
         convert_back_xml($case{$_case_attribute});
-        $case_save{$_case_attribute} = $case{$_case_attribute}; ## in case we have to retry, some parms need to be resubbed
-    }
-
-    return;
-}
-
-#------------------------------------------------------------------
-sub get_number_of_times_to_retry_this_test_step {
-
-    my $_retry;
-    $case{retry} = $xml_test_cases->{action}->{$testnum}->{retry}; ## optional retry of a failed test case
-    if ($case{retry}) { ## retry parameter found
-        $_retry = $case{retry}; ## assume we can retry as many times as specified
-        if ($config{globalretry}) { ## ensure that the global retry limit won't be exceeded
-            if ($_retry > ($config{globalretry} - $globalretries)) { ## we can't retry that many times
-                $_retry =  $config{globalretry} - $globalretries; ## this is the most we can retry
-                if ($_retry < 0) {
-                    return 0; ## if less than 0 then make 0
-                }
-            }
-        }
-        $results_stdout .= qq|Retry $_retry times\n|;
-        return $_retry;
-    }
-    else {
-        return 0; #no retry parameter found, don't retry this case
-    }
-
-    return; ## impossible to execute this statement
-}
-
-#------------------------------------------------------------------
-sub substitute_retry_variables {
-
-    foreach my $_case_attribute ( keys %{ $xml_test_cases->{action}->{$testnum} } ) {
-        if (defined $case_save{$_case_attribute}) ## defaulted parameters like posttype may not have a saved value on a subsequent loop
-        {
-            $case{$_case_attribute} = $case_save{$_case_attribute}; ## need to restore to the original partially substituted parameter
-            convert_back_xml_dynamic($case{$_case_attribute}); ## now update the dynamic components
-        }
-    }
-
-    return;
-}
-
-#------------------------------------------------------------------
-sub set_retry_to_zero_if_global_limit_exceeded {
-
-    if ($config{globalretry}) {
-        if ($globalretries >= $config{globalretry}) {
-            $retry = 0; ## globalretries value exceeded - not retrying any more this run
-        }
     }
 
     return;
@@ -615,37 +546,6 @@ sub output_test_step_description {
     }
 
     $results_html .= qq|<br />\n|;
-
-    return;
-}
-
-#------------------------------------------------------------------
-sub output_assertions {
-
-    ## display and log the verifications to do to stdout and html - xml output is done with the verification itself
-    ## verifypositive, verifypositive1, ..., verifypositive9999 (or even higher)
-    ## verifynegative, verifynegative2, ..., verifynegative9999 (or even higher)
-    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$testnum} } ) {
-        if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' || (substr $_case_attribute, 0, 14) eq 'verifynegative') {
-            my $_verifytype = substr $_case_attribute, 6, 8; ## so we get the word positive or negative
-            $_verifytype = ucfirst $_verifytype; ## change to Positive or Negative
-            my @_verifyparms = split /[|][|][|]/, $case{$_case_attribute} ; ## index 0 contains the actual string to verify
-            $results_html .= qq|Verify $_verifytype: "$_verifyparms[0]" <br />\n|;
-            $results_stdout .= qq|Verify $_verifytype: "$_verifyparms[0]" \n|;
-        }
-    }
-
-    if ($case{verifyresponsecode}) {
-        $results_html .= qq|Verify Response Code: "$case{verifyresponsecode}" <br />\n|;
-        $results_stdout .= qq|Verify Response Code: "$case{verifyresponsecode}" \n|;
-        $results_xml .= qq|            <verifyresponsecode>$case{verifyresponsecode}</verifyresponsecode>\n|;
-    }
-
-    if ($case{verifyresponsetime}) {
-        $results_html .= qq|Verify Response Time: at most "$case{verifyresponsetime} seconds" <br />\n|;
-        $results_stdout .= qq|Verify Response Time: at most "$case{verifyresponsetime}" seconds\n|;
-        $results_xml .= qq|            <verifyresponsetime>$case{verifyresponsetime}</verifyresponsetime>\n|;
-    }
 
     return;
 }
@@ -673,56 +573,6 @@ sub execute_test_step {
     }
     else {
         httpget();  #use "get" if no method is specified
-    }
-
-    return;
-}
-
-#------------------------------------------------------------------
-sub pass_fail_or_retry {
-
-    if ( ( ($is_failure > 0) && ($retry < 1) ) || ($fast_fail_invoked eq 'true') ) {
-        ## if any verification fails, test case is considered a failure UNLESS there is at least one retry available
-        ## however if a verifynegative fails then the case is always a failure
-        $results_xml .= qq|            <success>false</success>\n|;
-        if ($case{errormessage}) { #Add defined error message to the output
-            $results_html .= qq|<b><span class="fail">TEST CASE FAILED : $case{errormessage}</span></b><br />\n|;
-            $results_xml .= '            <result-message>'._sub_xml_special($case{errormessage})."</result-message>\n";
-            $results_stdout .= qq|TEST CASE FAILED : $case{errormessage}\n|;
-            if (not $return_message) {
-                $return_message = $case{errormessage}; ## only return the first error message to nagios
-            }
-        }
-        else { #print regular error output
-            $results_html .= qq|<b><span class="fail">TEST CASE FAILED</span></b><br />\n|;
-            $results_xml .= qq|            <result-message>TEST CASE FAILED</result-message>\n|;
-            $results_stdout .= qq|TEST CASE FAILED\n|;
-            if (not $return_message) {
-                $return_message = "Test case number $testnum failed"; ## only return the first test case failure to nagios
-            }
-        }
-        $case_failed_count++;
-    }
-    elsif (($is_failure > 0) && ($retry > 0)) {#Output message if we will retry the test case
-        $results_html .= qq|<b><span class="pass">RETRYING... $retry to go</span></b><br />\n|;
-        $results_stdout .= qq|RETRYING... $retry to go \n|;
-        $results_xml .= qq|            <success>false</success>\n|;
-        $results_xml .= qq|            <result-message>RETRYING... $retry to go</result-message>\n|;
-
-        ## all this is for ensuring correct behaviour when retries occur
-        $retries_print = ".$retries";
-        $retries++;
-        $globalretries++;
-        $passed_count = $passed_count - $retry_passed_count;
-        $failed_count = $failed_count - $retry_failed_count;
-    }
-    else {
-        $results_html .= qq|<b><span class="pass">TEST CASE PASSED</span></b><br />\n|;
-        $results_stdout .= qq|TEST CASE PASSED \n|;
-        $results_xml .= qq|            <success>true</success>\n|;
-        $results_xml .= qq|            <result-message>TEST CASE PASSED</result-message>\n|;
-        $case_passed_count++;
-        $retry = 0; # no need to retry when test case passes
     }
 
     return;
@@ -768,15 +618,6 @@ sub output_test_step_results {
 }
 
 #------------------------------------------------------------------
-sub increment_run_count {
-
-    $run_count++;
-    $total_run_count++;
-
-    return;
-}
-
-#------------------------------------------------------------------
 sub update_latency_statistics {
 
     if ($latency > $max_response) { $max_response = $latency; }  #set max response time
@@ -790,12 +631,6 @@ sub update_latency_statistics {
 
 #------------------------------------------------------------------
 sub restart_browser {
-
-    if ($case{restartbrowseronfail} && ($is_failure > 0)) { ## restart the Selenium browser session and also the StateBot session
-        $results_stdout .= qq|RESTARTING SESSION DUE TO FAIL ... \n|;
-        if ($opt_driver) { start_selenium_browser(); }
-        start_session();
-    }
 
     if ($case{restartbrowser}) { ## restart the Selenium browser session and also the StateBot session
         $results_stdout .= qq|RESTARTING BROWSER ... \n|;
@@ -1039,22 +874,6 @@ sub write_final_stdout {  #write summary and closing text for STDOUT
             print {*STDERR} "\nError: only 'nagios' or 'standard' are supported reporttype values\n\n";
         }
 
-    }
-
-    return;
-}
-
-#------------------------------------------------------------------
-sub _run_this_step {
-    my ($_runon_parm) = @_;
-
-    my @_run_on = split /[|]/, $_runon_parm; ## get the list of environments that this test step can be run on
-    foreach (@_run_on) {
-        if (defined $user_config->{wif}->{environment}) {
-            if ( $_ eq $user_config->{wif}->{environment} ) {
-                return 'true';
-            }
-        }
     }
 
     return;
@@ -2271,398 +2090,6 @@ sub decode_quoted_printable {
 }
 
 #------------------------------------------------------------------
-sub verify {  #do verification of http response and print status to HTML/XML/STDOUT/UI
-
-    searchimage(); ## search for images within actual screen or page grab
-
-    ## reset the global variables
-    $assertion_skips = 0;
-    $assertion_skips_message = q{}; ## support tagging an assertion as disabled with a message
-
-    ## auto assertions
-    if (!$case{ignoreautoassertions}) {
-        ## autoassertion, autoassertion1, ..., autoassertion4, ..., autoassertion10000 (or more)
-        _verify_autoassertion();
-    }
-
-    ## smart assertions
-    if (!$case{ignoresmartassertions}) {
-        _verify_smartassertion();
-    }
-
-    ## verify positive
-    ## verifypositive, verifypositive1, ..., verifypositive25, ..., verifypositive10000 (or more)
-    _verify_verifypositive();
-
-    ## verify negative
-    ## verifynegative, verifynegative1, ..., verifynegative25, ..., verifynegative10000 (or more)
-    _verify_verifynegative();
-
-    ## assert count
-    _verify_assertcount();
-
-     if ($case{verifyresponsetime}) { ## verify that the response time is less than or equal to given amount in seconds
-         if ($latency <= $case{verifyresponsetime}) {
-                $results_html .= qq|<span class="pass">Passed Response Time Verification</span><br />\n|;
-                $results_xml .= qq|            <verifyresponsetime-success>true</verifyresponsetime-success>\n|;
-                $results_stdout .= "Passed Response Time Verification \n";
-                $passed_count++;
-                $retry_passed_count++;
-         }
-         else {
-                $results_html .= qq|<span class="fail">Failed Response Time Verification - should be at most $case{verifyresponsetime}, got $latency</span><br />\n|;
-                $results_xml .= qq|            <verifyresponsetime-success>false</verifyresponsetime-success>\n|;
-                $results_xml .= qq|            <verifyresponsetime-message>Latency should be at most $case{verifyresponsetime} seconds</verifyresponsetime-message>\n|;
-                $results_stdout .= "Failed Response Time Verification - should be at most $case{verifyresponsetime}, got $latency \n";
-                $failed_count++;
-                $retry_failed_count++;
-                $is_failure++;
-        }
-     }
-
-    if ($case{verifyresponsecode}) {
-        if ($case{verifyresponsecode} == $response->code()) { #verify returned HTTP response code matches verifyresponsecode set in test case
-            $results_html .= qq|<span class="pass">Passed HTTP Response Code Verification </span><br />\n|;
-            $results_xml .= qq|            <verifyresponsecode-success>true</verifyresponsecode-success>\n|;
-            $results_xml .= qq|            <verifyresponsecode-message>Passed HTTP Response Code Verification</verifyresponsecode-message>\n|;
-            $results_stdout .= qq|Passed HTTP Response Code Verification \n|;
-            $passed_count++;
-            $retry_passed_count++;
-            $retry=0; ## we won't retry if the response code is invalid since it will probably never work
-            }
-        else {
-            $results_html .= '<span class="fail">Failed HTTP Response Code Verification (received ' . $response->code() .  qq|, expecting $case{verifyresponsecode})</span><br />\n|;
-            $results_xml .= qq|            <verifyresponsecode-success>false</verifyresponsecode-success>\n|;
-            $results_xml .=   '            <verifyresponsecode-message>Failed HTTP Response Code Verification (received ' . $response->code() .  qq|, expecting $case{verifyresponsecode})</verifyresponsecode-message>\n|;
-            $results_stdout .= 'Failed HTTP Response Code Verification (received ' . $response->code() .  qq|, expecting $case{verifyresponsecode}) \n|;
-            $failed_count++;
-            $retry_failed_count++;
-            $is_failure++;
-        }
-    }
-    else { #verify http response code is in the 100-399 range
-        if (($response->as_string() =~ /HTTP\/1.(0|1) (1|2|3)/i) || $case{ignorehttpresponsecode}) {  #verify existance of string in response - unless we are ignore error codes
-            $results_html .= qq|<span class="pass">Passed HTTP Response Code Verification</span><br />\n|;
-            $results_xml .= qq|            <verifyresponsecode-success>true</verifyresponsecode-success>\n|;
-            $results_xml .= qq|            <verifyresponsecode-message>Passed HTTP Response Code Verification</verifyresponsecode-message>\n|;
-            $results_stdout .= qq|Passed HTTP Response Code Verification \n|;
-            #succesful response codes: 100-399
-            $passed_count++;
-            $retry_passed_count++;
-        }
-        else {
-            $response->as_string() =~ /(HTTP\/1.)(.*)/i;
-            if ($1) {  #this is true if an HTTP response returned
-                $results_html .= qq|<span class="fail">Failed HTTP Response Code Verification ($1$2)</span><br />\n|; #($1$2) is HTTP response code
-                $results_xml .= qq|            <verifyresponsecode-success>false</verifyresponsecode-success>\n|;
-                $results_xml .= qq|            <verifyresponsecode-message>($1$2)</verifyresponsecode-message>\n|;
-                $results_stdout .= "Failed HTTP Response Code Verification ($1$2) \n"; #($1$2) is HTTP response code
-            }
-            else {  #no HTTP response returned.. could be error in connection, bad hostname/address, or can not connect to web server
-                $results_html .= qq|<span class="fail">Failed - No Response</span><br />\n|; #($1$2) is HTTP response code
-                $results_xml .= qq|            <verifyresponsecode-success>false</verifyresponsecode-success>\n|;
-                $results_xml .= qq|            <verifyresponsecode-message>Failed - No Response</verifyresponsecode-message>\n|;
-                $results_stdout .= "Failed - No Response \n"; #($1$2) is HTTP response code
-            }
-            $failed_count++;
-            $retry_failed_count++;
-            $is_failure++;
-        }
-    }
-
-    if ($assertion_skips > 0) {
-        $total_assertion_skips = $total_assertion_skips + $assertion_skips;
-        $results_xml .= qq|            <assertionskips>true</assertionskips>\n|;
-        $results_xml .= qq|            <assertionskips-message>$assertion_skips_message</assertionskips-message>\n|;
-    }
-
-    if (($case{commandonerror}) && ($is_failure > 0)) { ## if the test case failed, check if we want to run a command to help sort out any problems
-        commandonerror();
-    }
-
-    return;
-}
-
-sub _verify_autoassertion {
-
-    foreach my $_config_attribute ( sort keys %{ $user_config->{autoassertions} } ) {
-        if ( (substr $_config_attribute, 0, 13) eq 'autoassertion' ) {
-            my $_verify_number = $_config_attribute; ## determine index verifypositive index
-            $_verify_number =~ s/^autoassertion//g; ## remove autoassertion from string
-            if (!$_verify_number) {$_verify_number = '0';} #In case of autoassertion, need to treat as 0
-            my @_verifyparms = split /[|][|][|]/, $user_config->{autoassertions}{$_config_attribute} ; #index 0 contains the actual string to verify, 1 the message to show if the assertion fails, 2 the tag that it is a known issue
-            if ($_verifyparms[2]) { ## assertion is being ignored due to known production bug or whatever
-                $results_html .= qq|<span class="skip">Skipped Auto Assertion $_verify_number - $_verifyparms[2]</span><br />\n|;
-                $results_stdout .= "Skipped Auto Assertion $_verify_number - $_verifyparms[2] \n";
-                $assertion_skips++;
-                $assertion_skips_message = $assertion_skips_message . '[' . $_verifyparms[2] . ']';
-            }
-            else {
-                my $_results_xml = qq|            <$_config_attribute>\n|;
-                $_results_xml .= qq|                <assert>$_verifyparms[0]</assert>\n|;
-                #$results_stdout .= "$_verifyparms[0]\n"; ##DEBUG
-                if ($response->as_string() =~ m/$_verifyparms[0]/si) {  ## verify existence of string in response
-                    #$results_html .= qq|<span class="pass">Passed Auto Assertion</span><br />\n|; ## Do not print out all the auto assertion passes
-                    $_results_xml .= qq|                <success>true</success>\n|;
-                    #$results_stdout .= "Passed Auto Assertion \n"; ## Do not print out all the auto assertion passes
-                    #$results_stdout .= $_verify_number." Passed Auto Assertion \n"; ##DEBUG
-                    $passed_count++;
-                    $retry_passed_count++;
-                }
-                else {
-                    $results_html .= qq|<span class="fail">Failed Auto Assertion:</span>$_verifyparms[0]<br />\n|;
-                    $_results_xml .= qq|                <success>false</success>\n|;
-                    if ($_verifyparms[1]) { ## is there a custom assertion failure message?
-                       $results_html .= qq|<span class="fail">$_verifyparms[1]</span><br />\n|;
-                       $_results_xml .= qq|                <message>$_verifyparms[1]</message>\n|;
-                    }
-                    $results_stdout .= "Failed Auto Assertion \n";
-                    if ($_verifyparms[1]) {
-                       $results_stdout .= "$_verifyparms[1] \n";
-                    }
-                    $failed_count++;
-                    $retry_failed_count++;
-                    $is_failure++;
-                }
-                $_results_xml .= qq|            </$_config_attribute>\n|;
-
-                # only log the auto assertion if it failed
-                if ($_results_xml =~ m/success.false/) {
-                    $results_xml .= $_results_xml;
-                }
-            }
-        }
-    }
-
-    return;
-}
-
-sub _verify_smartassertion {
-
-    foreach my $_config_attribute ( sort keys %{ $user_config->{smartassertions} } ) {
-        if ( (substr $_config_attribute, 0, 14) eq 'smartassertion' ) {
-            my $_verify_number = $_config_attribute; ## determine index verifypositive index
-            $_verify_number =~ s/^smartassertion//g; ## remove smartassertion from string
-            if (!$_verify_number) {$_verify_number = '0';} #In case of smartassertion, need to treat as 0
-            my @_verifyparms = split /[|][|][|]/, $user_config->{smartassertions}{$_config_attribute} ; #index 0 contains the pre-condition assertion, 1 the actual assertion, 3 the tag that it is a known issue
-            if ($_verifyparms[3]) { ## assertion is being ignored due to known production bug or whatever
-                $results_html .= qq|<span class="skip">Skipped Smart Assertion $_verify_number - $_verifyparms[3]</span><br />\n|;
-                $results_stdout .= "Skipped Smart Assertion $_verify_number - $_verifyparms[2] \n";
-                $assertion_skips++;
-                $assertion_skips_message = $assertion_skips_message . '[' . $_verifyparms[2] . ']';
-                return;
-            }
-
-            ## note the return statement in the previous condition, this code is executed if the assertion is not being skipped
-            #$results_stdout .= "$_verifyparms[0]\n"; ##DEBUG
-            if ($response->as_string() =~ m/$_verifyparms[0]/si) {  ## pre-condition for smart assertion - first regex must pass
-                $results_xml .= "            <$_config_attribute>\n";
-                $results_xml .= '                <assert>'._sub_xml_special($_verifyparms[0])."</assert>\n";
-                if ($response->as_string() =~ m/$_verifyparms[1]/si) {  ## verify existence of string in response
-                    #$results_html .= qq|<span class="pass">Passed Smart Assertion</span><br />\n|; ## Do not print out all the auto assertion passes
-                    $results_xml .= qq|                <success>true</success>\n|;
-                    #$results_stdout .= "Passed Smart Assertion \n"; ## Do not print out the Smart Assertion passes
-                    $passed_count++;
-                    $retry_passed_count++;
-                }
-                else {
-                    $results_html .= qq|<span class="fail">Failed Smart Assertion:</span>$_verifyparms[0]<br />\n|;
-                    $results_xml .= qq|                <success>false</success>\n|;
-                    if ($_verifyparms[2]) { ## is there a custom assertion failure message?
-                       $results_html .= qq|<span class="fail">$_verifyparms[2]</span><br />\n|;
-                       $results_xml .= '                <message>'._sub_xml_special($_verifyparms[2])."</message>\n";
-                    }
-                    $results_stdout .= 'Failed Smart Assertion';
-                    if ($_verifyparms[2]) {
-                       $results_stdout .= ": $_verifyparms[2]";
-                    }
-                    $results_stdout .= "\n";
-                    $failed_count++;
-                    $retry_failed_count++;
-                    $is_failure++;
-                }
-                $results_xml .= qq|            </$_config_attribute>\n|;
-            } ## end if - is pre-condition for smart assertion met?
-        }
-    }
-
-    return;
-}
-
-sub _verify_verifypositive {
-
-    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$testnum} } ) {
-        if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' ) {
-            my $_verify_number = $_case_attribute; ## determine index verifypositive index
-            $_verify_number =~ s/^verifypositive//g; ## remove verifypositive from string
-            if (!$_verify_number) {$_verify_number = '0';} #In case of verifypositive, need to treat as 0
-            my @_verifyparms = split /[|][|][|]/, $case{$_case_attribute} ; #index 0 contains the actual string to verify, 1 the message to show if the assertion fails, 2 the tag that it is a known issue
-            my $_fail_fast = _is_fail_fast(\$_verifyparms[0]); ## will strip off leading fail fast! if present
-            if ($_verifyparms[2]) { ## assertion is being ignored due to known production bug or whatever
-                $results_html .= qq|<span class="skip">Skipped Positive Verification $_verify_number - $_verifyparms[2]</span><br />\n|;
-                $results_stdout .= "Skipped Positive Verification $_verify_number - $_verifyparms[2] \n";
-                $assertion_skips++;
-                $assertion_skips_message = $assertion_skips_message . '[' . $_verifyparms[2] . ']';
-            }
-            else {
-                $results_xml .= "            <$_case_attribute>\n";
-                $results_xml .= '                <assert>'._sub_xml_special($_verifyparms[0])."</assert>\n";
-                if ($response->as_string() =~ m/$_verifyparms[0]/si) {  ## verify existence of string in response
-                    $results_html .= qq|<span class="pass">Passed Positive Verification</span><br />\n|;
-                    $results_xml .= qq|                <success>true</success>\n|;
-                    $results_stdout .= "Passed Positive Verification \n";
-                    #$results_stdout .= $_verify_number." Passed Positive Verification \n"; ##DEBUG
-                    $passed_count++;
-                    $retry_passed_count++;
-                }
-                else {
-                    $results_html .= qq|<span class="fail">Failed Positive Verification:</span>$_verifyparms[0]<br />\n|;
-                    $results_xml .= qq|                <success>false</success>\n|;
-                    if ($_verifyparms[1]) { ## is there a custom assertion failure message?
-                       $results_html .= qq|<span class="fail">$_verifyparms[1]</span><br />\n|;
-                       $results_xml .= '                <message>'._sub_xml_special($_verifyparms[1])."</message>\n";
-                    }
-                    $results_stdout .= "Failed Positive Verification $_verify_number\n";
-                    if ($_verifyparms[1]) {
-                       $results_stdout .= "$_verifyparms[1] \n";
-                    }
-                    $failed_count++;
-                    $retry_failed_count++;
-                    $is_failure++;
-                    if ($_fail_fast) {
-                        if ($retry > 0) { $results_stdout .= "==> Won't retry - a fail fast was invoked \n"; }
-                        $retry=0; ## we won't retry if a fail fast was invoked
-                        $fast_fail_invoked = 'true';
-                    }
-                }
-                $results_xml .= qq|            </$_case_attribute>\n|;
-            }
-        }
-    }
-
-    return;
-}
-
-sub _verify_verifynegative {
-
-    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$testnum} } ) {
-        if ( (substr $_case_attribute, 0, 14) eq 'verifynegative' ) {
-            my $_verify_number = $_case_attribute; ## determine index verifypositive index
-            #$results_stdout .= "$_case_attribute\n"; ##DEBUG
-            $_verify_number =~ s/^verifynegative//g; ## remove verifynegative from string
-            if (!$_verify_number) {$_verify_number = '0';} ## in case of verifypositive, need to treat as 0
-            my @_verifyparms = split /[|][|][|]/, $case{$_case_attribute} ; #index 0 contains the actual string to verify
-            my $_fail_fast = _is_fail_fast(\$_verifyparms[0]); ## will strip off leading !!! if present
-            if ($_verifyparms[2]) { ## assertion is being ignored due to known production bug or whatever
-                $results_html .= qq|<span class="skip">Skipped Negative Verification $_verify_number - $_verifyparms[2]</span><br />\n|;
-                $results_stdout .= "Skipped Negative Verification $_verify_number - $_verifyparms[2] \n";
-                $assertion_skips++;
-                $assertion_skips_message = $assertion_skips_message . '[' . $_verifyparms[2] . ']';
-            }
-            else {
-                $results_xml .= "            <$_case_attribute>\n";
-                $results_xml .= '                <assert>'._sub_xml_special($_verifyparms[0])."</assert>\n";
-                if ($response->as_string() =~ m/$_verifyparms[0]/si) {  #verify existence of string in response
-                    $results_html .= qq|<span class="fail">Failed Negative Verification</span><br />\n|;
-                    $results_xml .= qq|                <success>false</success>\n|;
-                    if ($_verifyparms[1]) {
-                       $results_html .= qq|<span class="fail">$_verifyparms[1]</span><br />\n|;
-                         $results_xml .= '            <message>'._sub_xml_special($_verifyparms[1])."</message>\n";
-                    }
-                    $results_stdout .= "Failed Negative Verification $_verify_number\n";
-                    if ($_verifyparms[1]) {
-                       $results_stdout .= "$_verifyparms[1] \n";
-                    }
-                    $failed_count++;
-                    $retry_failed_count++;
-                    $is_failure++;
-                    if ($_fail_fast) {
-                        if ($retry > 0) { $results_stdout .= "==> Won't retry - a fail fast was invoked \n"; }
-                        $retry=0; ## we won't retry if a fail fast was invoked
-                        $fast_fail_invoked = 'true';
-                    }
-                }
-                else {
-                    $results_html .= qq|<span class="pass">Passed Negative Verification</span><br />\n|;
-                    $results_xml .= qq|            <success>true</success>\n|;
-                    $results_stdout .= "Passed Negative Verification \n";
-                    $passed_count++;
-                    $retry_passed_count++;
-                }
-                $results_xml .= qq|            </$_case_attribute>\n|;
-            }
-        }
-    }
-
-    return;
-}
-
-
-sub _is_fail_fast {
-    my ($_assertion) = @_;
-
-    ## since a reference to the original variable has been passed, it will be stripped of the leading !!! if present
-    if ( ${$_assertion} =~ s/^fail fast!// ) {
-        return 1;
-    }
-
-    return;
-}
-
-sub _verify_assertcount {
-
-    foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$testnum} } ) {
-        if ( (substr $_case_attribute, 0, 11) eq 'assertcount' ) {
-            my $_verify_number = $_case_attribute; ## determine index verifypositive index
-            #$results_stdout .= "$_case_attribute\n"; ##DEBUG
-            $_verify_number =~ s/^assertcount//g; ## remove assertcount from string
-            if (!$_verify_number) {$_verify_number = '0';} ## in case of verifypositive, need to treat as 0
-            my @_verify_count_parms = split /[|][|][|]/, $case{$_case_attribute} ;
-            my $_count = 0;
-            my $_temp_string=$response->as_string(); #need to put in a temporary variable otherwise it gets stuck in infinite loop
-
-            while ($_temp_string =~ m/$_verify_count_parms[0]/ig) { $_count++;} ## count how many times string is found
-
-            if ($_verify_count_parms[3]) { ## assertion is being ignored due to known production bug or whatever
-                $results_html .= qq|<span class="skip">Skipped Assertion Count $_verify_number - $_verify_count_parms[3]</span><br />\n|;
-                $results_stdout .= "Skipped Assertion Count $_verify_number - $_verify_count_parms[2] \n";
-                $assertion_skips++;
-                $assertion_skips_message = $assertion_skips_message . '[' . $_verify_count_parms[2] . ']';
-            }
-            else {
-                if ($_count == $_verify_count_parms[1]) {
-                    $results_html .= qq|<span class="pass">Passed Count Assertion of $_verify_count_parms[1]</span><br />\n|;
-                    $results_xml .= qq|            <$_case_attribute-success>true</$_case_attribute-success>\n|;
-                    $results_stdout .= "Passed Count Assertion of $_verify_count_parms[1] \n";
-                    $passed_count++;
-                    $retry_passed_count++;
-                }
-                else {
-                    $results_xml .= qq|            <$_case_attribute-success>false</$_case_attribute-success>\n|;
-                    if ($_verify_count_parms[2]) {## if there is a custom message, write it out
-                        $results_html .= qq|<span class="fail">Failed Count Assertion of $_verify_count_parms[1], got $_count</span><br />\n|;
-                        $results_html .= qq|<span class="fail">$_verify_count_parms[2]</span><br />\n|;
-                        $results_xml .= qq|            <$_case_attribute-message>|._sub_xml_special($_verify_count_parms[2]).qq| [got $_count]</$_case_attribute-message>\n|;
-                    }
-                    else {# we make up a standard message
-                        $results_html .= qq|<span class="fail">Failed Count Assertion of $_verify_count_parms[1], got $_count</span><br />\n|;
-                        $results_xml .= qq|            <$_case_attribute-message>Failed Count Assertion of $_verify_count_parms[1], got $_count</$_case_attribute-message>\n|;
-                    }
-                    $results_stdout .= "Failed Count Assertion of $_verify_count_parms[1], got $_count \n";
-                    if ($_verify_count_parms[2]) {
-                        $results_stdout .= "$_verify_count_parms[2] \n";
-                    }
-                    $failed_count++;
-                    $retry_failed_count++;
-                    $is_failure++;
-                } ## end else _verifycountparms[2]
-            } ## end else _verifycountparms[3]
-        } ## end if assertcount
-    } ## end foreach
-
-    return;
-}
-#------------------------------------------------------------------
 sub parseresponse {  #parse values from responses for use in future request (for session id's, dynamic URL rewriting, etc)
 
     my ($_response_to_parse, @_parse_args);
@@ -2931,13 +2358,6 @@ sub _write_failed_xml {
 sub _include_file {
     my ($_file, $_id, $_match) = @_;
 
-    if ( $_match =~ /runon[\s]*=[\s]*"([^"]*)/ ) {
-        if ( not _run_this_step($1) ) {
-            $results_stdout .= "not included: [id $_id] $_file (run on $1)\n";
-            return q{};
-        }
-    }
-
     $results_stdout .= "include: [id $_id] $_file\n";
 
     my $_include = read_file(slash_me($_file));
@@ -3032,6 +2452,25 @@ sub convert_back_xml {  #converts replaced xml with substitutions
         $_[0] =~ s/{$_KEY}/$_value/g;
     }
 
+    my $_elapsed_seconds_so_far = int(time() - $start_time) + 1; ## elapsed time rounded to seconds - increased to the next whole number
+    my $_elapsed_minutes_so_far = int($_elapsed_seconds_so_far / 60) + 1; ## elapsed time rounded to seconds - increased to the next whole number
+
+    $_[0] =~ s/{ELAPSED_SECONDS}/$_elapsed_seconds_so_far/g; ## always rounded up
+    $_[0] =~ s/{ELAPSED_MINUTES}/$_elapsed_minutes_so_far/g; ## always rounded up
+
+    ## put the current date and time into variables
+    my ($_dynamic_second, $_dynamic_minute, $_dynamic_hour, $_dynamic_day_of_month, $_dynamic_month, $_dynamic_year_offset, $_dynamic_day_of_week, $_dynamic_day_of_year, $_dynamic_daylight_savings) = localtime;
+    my $_dynamic_year = 1900 + $_dynamic_year_offset;
+    $_dynamic_month = $MONTHS[$_dynamic_month];
+    my $_dynamic_day = sprintf '%02d', $_dynamic_day_of_month;
+    $_dynamic_hour = sprintf '%02d', $_dynamic_hour; #put in up to 2 leading zeros
+    $_dynamic_minute = sprintf '%02d', $_dynamic_minute;
+    $_dynamic_second = sprintf '%02d', $_dynamic_second;
+
+    # Optimise this by putting the logic above in a sub and make the regex only call the sub when needed, since {NOW} is rarely used
+    $_[0] =~ s{{NOW}}{$_dynamic_day\/$_dynamic_month\/$_dynamic_year$_underscore$_dynamic_hour:$_dynamic_minute:$_dynamic_second}g;
+
+
     return;
 }
 
@@ -3112,33 +2551,6 @@ sub _get_number_in_range {
     my ($_min_desired_rnd, $_max_desired_rnd, $_max_possible_rnd, $_raw_rnd) = @_;
 
     return ( ($_raw_rnd * $_max_desired_rnd) / $_max_possible_rnd ) + $_min_desired_rnd;
-}
-
-#------------------------------------------------------------------
-sub convert_back_xml_dynamic {## some values need to be updated after each retry
-
-    my $_retries_sub = $retries-1;
-
-    my $_elapsed_seconds_so_far = int(time() - $start_time) + 1; ## elapsed time rounded to seconds - increased to the next whole number
-    my $_elapsed_minutes_so_far = int($_elapsed_seconds_so_far / 60) + 1; ## elapsed time rounded to seconds - increased to the next whole number
-
-    $_[0] =~ s/{RETRY}/$_retries_sub/g;
-    $_[0] =~ s/{ELAPSED_SECONDS}/$_elapsed_seconds_so_far/g; ## always rounded up
-    $_[0] =~ s/{ELAPSED_MINUTES}/$_elapsed_minutes_so_far/g; ## always rounded up
-
-    ## put the current date and time into variables
-    my ($_dynamic_second, $_dynamic_minute, $_dynamic_hour, $_dynamic_day_of_month, $_dynamic_month, $_dynamic_year_offset, $_dynamic_day_of_week, $_dynamic_day_of_year, $_dynamic_daylight_savings) = localtime;
-    my $_dynamic_year = 1900 + $_dynamic_year_offset;
-    $_dynamic_month = $MONTHS[$_dynamic_month];
-    my $_dynamic_day = sprintf '%02d', $_dynamic_day_of_month;
-    $_dynamic_hour = sprintf '%02d', $_dynamic_hour; #put in up to 2 leading zeros
-    $_dynamic_minute = sprintf '%02d', $_dynamic_minute;
-    $_dynamic_second = sprintf '%02d', $_dynamic_second;
-
-    my $_underscore = '_';
-    $_[0] =~ s{{NOW}}{$_dynamic_day\/$_dynamic_month\/$_dynamic_year$_underscore$_dynamic_hour:$_dynamic_minute:$_dynamic_second}g;
-
-    return;
 }
 
 #------------------------------------------------------------------
