@@ -42,8 +42,7 @@
 
 <goal
     id="1"
-    name="SEARCH_RESULTS"
-    description1="Check that Search Results page displayed"
+    description1="Search Results page displayed"
     verifytext="get_body_text|get_current_url"
     verifypositive1="Automation Engineer jobs in London"
     verifypositive2="<get_current_url1>http://www.totaljobs.com/jobs/automation-engineer/in-london_south-east"
@@ -60,7 +59,7 @@
 <fail
     id="2"
     description1="Should not take more than 10 actions"
-    max-actions="10"
+    maxactions="10"
 />
 
 

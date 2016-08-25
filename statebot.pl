@@ -95,8 +95,8 @@ $hostname =~ s/\r|\n//g; ## strip out any rogue linefeeds or carriage returns
 
 my $is_windows = $^O eq 'MSWin32' ? 1 : 0;
 
-my ($all_goals_reached, $failure_condition_reached);
-my (%state_info);
+my ($all_goals_satisfied, $failure_condition_reached);
+my (%state_info, %goal, %fail);
 my ($default_action_id);
 
 ## Startup
@@ -139,6 +139,8 @@ print "-------------------------------------------------------\n";
     $jumpbacks = 0;
 
 my @actions = sort {$a<=>$b} keys %{$xml_test_cases->{action}};
+my @goals = sort {$a<=>$b} keys %{$xml_test_cases->{goal}};
+my @fails = sort {$a<=>$b} keys %{$xml_test_cases->{fail}};
 
 # Main Loop
 #
@@ -160,7 +162,7 @@ my @actions = sort {$a<=>$b} keys %{$xml_test_cases->{action}};
 
 #        $testnum = $test_steps[$step_index];
 
-while (!$all_goals_reached && !$failure_condition_reached) {
+while (!$all_goals_satisfied && !$failure_condition_reached) {
     $testnum = determine_action_to_execute();
     print "Executing action $testnum\n";
 
@@ -169,8 +171,6 @@ while (!$all_goals_reached && !$failure_condition_reached) {
     $is_failure = 0;
     $retries = 1; ## we increment retries after writing to the log
     $retries_print = q{}; ## the printable value is used before writing the results to the log, so it is one behind, 0 being printed as null
-
-    set_useragent($xml_test_cases->{action}->{$testnum}->{useragent});
 
     # populate variables with values from testcase file, do substitutions, and revert converted values back
 
@@ -211,12 +211,12 @@ while (!$all_goals_reached && !$failure_condition_reached) {
 
     sleep_before_next_step();
 
-#    check_if_any_goals_reached();
+    check_if_any_goals_reached();
 
-#    $all_goals_reached = check_if_all_goals_reached();
+    $all_goals_satisfied = are_all_goals_satisfied();
 
-    if (!$all_goals_reached) {
-#        $failure_condition_reached = check_if_failure_conditon_reached();
+    if (!$all_goals_satisfied) {
+        $failure_condition_reached = any_failure_conditon_reached();
     }
 
 } ## end of while loop
@@ -234,6 +234,25 @@ my $status = $case_failed_count cmp 0;
 exit $status;
 ## End main code
 
+## Roadmap
+##
+## - numbering system fixed for actions that are executed 2 or more times
+## - honor maxactions
+## - include searchimage assertion
+## - inclue assertcount assertion
+## - incorporate http session state
+## - incorporate command response state
+## - self test for one of each - action, goal & fail
+## - self test 0 actions, goals or fails
+## - fail condition is allowed to be reached a max number of times (default 1)
+## - goal has to be reached at least a number of times (default 1)
+## - max number of times an action can be run in a row (default null meaning infinite)
+## - max number of times an action can be run fullstop?
+## - additional ways of finding out the value contained in a text box (currently only id identifier supported)
+## - number of times a goal has been met is available as a substitution variable
+## - number of times a fail condition has been reached is available as a substitution variable
+## - number of times an action has been executed is available as a substitution variable
+
 #------------------------------------------------------------------
 #  SUBROUTINES
 #------------------------------------------------------------------
@@ -248,6 +267,7 @@ sub determine_action_to_execute {
     if (not $total_run_count) {
         $default_action_id = _determine_default_action_id();
         if ($default_action_id) {
+            print "[Default action is $default_action_id]\n";
             return $default_action_id;
         } else {
             die "Nothing to do!\n\nSuggest adding an action with no pre-condition - e.g. Get home page\n";
@@ -280,6 +300,73 @@ sub determine_action_to_execute {
     print "   No action passes assertions\n";
     sleep 3;
     return $default_action_id; # will be null if no action found
+}
+
+#------------------------------------------------------------------
+sub check_if_any_goals_reached {
+
+    foreach my $_goal_id ( @goals ) {
+        if ($_goal_id == 99999999) { next; }
+
+        if ( _check_assertions('goal', $_goal_id) ) {
+            if ( $goal{$_goal_id} ) {
+                $goal{$_goal_id}++; # goal has previously been met, so increment the number of times met
+                #print "Goal $_goal_id met $goal{$_goal_id} times\n"; 
+            } else {
+                $goal{$_goal_id} = 1; # goal has been met for first time
+                #print "Goal $_goal_id now met\n"; 
+            }
+        }
+
+    }
+
+}
+
+#------------------------------------------------------------------
+sub any_failure_conditon_reached {
+
+    foreach my $_fail_id ( @fails ) {
+        if ($_fail_id == 99999999) { next; }
+
+        if ( _check_assertions('fail', $_fail_id) ) {
+            if ( $fail{$_fail_id} ) {
+                $fail{$_fail_id}++; # fail condition has previously been reached, so increment the number of times reached
+                #print "Fail condition $_fail_id reached $fail{$_fail_id} times\n";
+                return 1;
+            } else {
+                $fail{$_fail_id} = 1; # fail condition has been met for first time
+                #print "Fail condition $_fail_id reached for first time\n"; 
+                return 1;
+            }
+        }
+
+    }
+
+    return;
+}
+
+#------------------------------------------------------------------
+sub are_all_goals_satisfied {
+
+    my $_all_goals_satisfied = 1; # assume all the goals have been reached, unless we learn otherwise
+
+    foreach my $_goal_id ( @goals ) {
+        if ($_goal_id == 99999999) { next; }
+
+        if ( $goal{$_goal_id} ) {
+            # goal has been met, as assumed
+        } else {
+            # this goal has not been met, so our assumption is false
+            $_all_goals_satisfied = 0; 
+        }
+
+    }
+
+    if ($_all_goals_satisfied) {
+        print "\nAll goals have been satisfied!\n\n"; # if there are no goals, then it is true to say all goals have been met (if a little misleading)
+    }
+
+    return $_all_goals_satisfied;
 }
 
 #------------------------------------------------------------------
@@ -327,7 +414,7 @@ sub _check_assertions {
     }
 
     if ($_all_assertions_match) {
-        print "   All assertions match for $_tag $_id\n";
+        print "[All assertions match for $_tag $_id]\n";
         return 1;
     }
 
@@ -352,10 +439,10 @@ sub _determine_default_action_id {
 
     foreach my $_action_id ( @actions ) {
         if ($_action_id == 99999999) { next; }
-        print "action id:$_action_id\n";
+        #print "action id:$_action_id\n";
         my $_found_default = 1; ## assume the current action is the default
         foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$_action_id} } ) {
-            print "$_case_attribute\n";
+            #print "$_case_attribute\n";
             if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' ) {
                 undef $_found_default;
             }
@@ -518,6 +605,17 @@ sub set_useragent {
 }
 
 #------------------------------------------------------------------
+sub set_max_redirect {
+    my ($_max_redirect) = @_;
+
+    if (not $_max_redirect) { return; }
+
+    $useragent->max_redirect($_max_redirect);
+
+    return;
+}
+
+#------------------------------------------------------------------
 sub substitute_variables {
 
     ## "method", "description1", "description2", "url", "postbody", "posttype", "addheader", "command", "command1", ... "command20", "parms", "verifytext",
@@ -571,6 +669,9 @@ sub execute_test_step {
         if ($case{method} eq 'cmd') { cmd(); return; }
         if ($case{method} eq 'selenium') { selenium(); return; }
     }
+
+    set_useragent($xml_test_cases->{action}->{$testnum}->{useragent});
+    set_max_redirect($xml_test_cases->{case}->{$testnum}->{maxredirect});
 
     if (not $session_started) {
         start_session();
@@ -912,14 +1013,14 @@ sub selenium {  ## send Selenium command and read response
             if (defined $selresp) { ## phantomjs does not return a defined response sometimes
                 if (($selresp =~ m/(^|=)HASH\b/) || ($selresp =~ m/(^|=)ARRAY\b/)) { ## check to see if we have a HASH or ARRAY object returned
                     my $_dumper_response = Data::Dumper::Dumper($selresp);
-                    $results_stdout .= "SELRESP: DUMPED:\n$_dumper_response";
+                    #$results_stdout .= "SELRESP: DUMPED:\n$_dumper_response";
                     $selresp = "selresp:DUMPED:$_dumper_response";
                 } else {
-                    $results_stdout .= "SELRESP:$selresp\n";
+                    #$results_stdout .= "SELRESP:$selresp\n";
                     $selresp = "selresp:$selresp";
                 }
             } else {
-                $results_stdout .= "SELRESP:<undefined>\n";
+                #$results_stdout .= "SELRESP:<undefined>\n";
                 $selresp = 'selresp:<undefined>';
             }
             $_combined_response =~ s{$}{<$_>$_command</$_>\n$selresp\n\n\n}; ## include it in the response
@@ -2110,7 +2211,7 @@ sub parseresponse {  #parse values from responses for use in future request (for
     if (!@_verify_text) { return; } # need something to parse
 
     # Now we buffer all of the verify text in %state_info, at the same time building up a single response text object to parse in one go
-    my $_combined_response;
+    my $_combined_response = q{};
     foreach (@_verify_text) {
         if (not $state_info{$_}) {
             #print "   Need to retrieve $_ state\n";
