@@ -37,7 +37,7 @@ my (%test_step_time); ## record in a hash the latency for every step for later u
 my ($cookie_jar, @http_auth);
 my ($total_run_count, $case_passed_count, $case_failed_count, $passed_count, $failed_count);
 my ($total_response, $avg_response, $max_response, $min_response);
-my ($current_case_file, $current_case_filename, $action_count, $is_failure, $fast_fail_invoked);
+my ($current_case_file, $current_case_filename, $action_count, $goal_count, $fail_count, $is_failure);
 my (%case, %case_save);
 my (%config);
 my ($current_date_time, $total_run_time, $start_timer, $end_timer);
@@ -143,8 +143,8 @@ my @actions = sort {$a<=>$b} keys %{$xml_test_cases->{action}};
 # Main Loop
 #
 # - determine which action to execute based on current state
-# - parse responses (i.e. action verify-texts)
 # - execute that action
+# - parse responses (i.e. turn action verify-texts into response object)
 # - check if any goals have been reached, if so report success and increment number of times that goal has been reached
 # - check if all goals have been reached at least once, if so report success and end execution
 # - check if a failure condition has been reached, if so report failure and end execution
@@ -179,7 +179,6 @@ while (!$all_goals_reached && !$failure_condition_reached) {
     substitute_var_variables();
 
     $is_failure = 0;
-    $fast_fail_invoked = 'false';
     $retry_passed_count = 0;
     $retry_failed_count = 0;
 
@@ -264,13 +263,12 @@ sub determine_action_to_execute {
 #
 # RETURN the default action
 
-    undef %state_info;
-
     #foreach my $_action ( @actions ) {
     #    print "found action:$_action\n";
     #}
 
     foreach my $_action_id ( @actions ) {
+        if ($_action_id == 99999999) { next; }
         #print "checking action:$_action_id\n";
 
         if ( _check_assertions('action', $_action_id) ) {
@@ -288,13 +286,8 @@ sub determine_action_to_execute {
 sub _check_assertions {
     my ($_tag, $_id) = @_;
 
-    my @_parse_verify;
-    my $_all_assertions_match = 1; # assume that all the assertions match for this action, until proven otherwise
-    if ( $xml_test_cases->{$_tag}->{$_id}->{verifytext} ) {
-        @_parse_verify = split /[|]/, $xml_test_cases->{$_tag}->{$_id}->{verifytext};
-    } else {
-        return 0; # must have a state object to assert against
-    }
+    my @_parse_verify = _split_verify_text($_tag, $_id);
+    if (!@_parse_verify) { return 0; } # must have a state object to assert against
 
     # First buffer all of the verify text in %state_info
     foreach (@_parse_verify) {
@@ -305,6 +298,8 @@ sub _check_assertions {
             #print "   Already have $_ state\n";
         }
     }
+
+    my $_all_assertions_match = 1; # assume that all the assertions match for this action, until proven otherwise
 
     # process *all* of the positive verifications first
     foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{$_tag}->{$_id} } ) {
@@ -339,12 +334,28 @@ sub _check_assertions {
     return 0; # not a match
 }
 
+
+#------------------------------------------------------------------
+sub _split_verify_text {
+    my ($_tag, $_id) = @_;
+
+    if ( $xml_test_cases->{$_tag}->{$_id}->{verifytext} ) {
+        return split /[|]/, $xml_test_cases->{$_tag}->{$_id}->{verifytext};
+    } else {
+        return;
+    }
+
+}
+
 #------------------------------------------------------------------
 sub _determine_default_action_id {
 
     foreach my $_action_id ( @actions ) {
+        if ($_action_id == 99999999) { next; }
+        print "action id:$_action_id\n";
         my $_found_default = 1; ## assume the current action is the default
         foreach my $_case_attribute ( sort keys %{ $xml_test_cases->{action}->{$_action_id} } ) {
+            print "$_case_attribute\n";
             if ( (substr $_case_attribute, 0, 14) eq 'verifypositive' ) {
                 undef $_found_default;
             }
@@ -2092,6 +2103,26 @@ sub decode_quoted_printable {
 #------------------------------------------------------------------
 sub parseresponse {  #parse values from responses for use in future request (for session id's, dynamic URL rewriting, etc)
 
+    # Ok, the state has changed since we have just executed an action, so first we throw away the previous state
+    undef %state_info;
+
+    my @_verify_text = _split_verify_text('action',$testnum);
+    if (!@_verify_text) { return; } # need something to parse
+
+    # Now we buffer all of the verify text in %state_info, at the same time building up a single response text object to parse in one go
+    my $_combined_response;
+    foreach (@_verify_text) {
+        if (not $state_info{$_}) {
+            #print "   Need to retrieve $_ state\n";
+            _get_selenium_info($_);
+            $_combined_response =~ s{$}{<$_>\n$state_info{$_}\n</$_>\n\n\n};
+        } else {
+            #print "   Already have $_ state\n";
+        }
+    }
+    $_combined_response =~ s{^}{HTTP/1.1 100 OK\n\n}; ## pretend this is an HTTP response - 100 means continue
+    $response = HTTP::Response->parse($_combined_response); ## pretend the response is an http response - inject it into the object
+
     my ($_response_to_parse, @_parse_args);
     my ($_left_boundary, $_right_boundary, $_escape);
 
@@ -2306,14 +2337,38 @@ sub read_test_case_file {
     while ( $_xml =~ s/\w\s*=\s*'[^']*\K<(?!case)([^']*')/{LESSTHAN}$1/sg ) {}
     #$_xml =~ s/\\</{LESSTHAN}/g;
 
+    ## It seems the way XMLin does parsing of XML to a hash varies on how many records there are
+    ## If the XML contains one tag only, the hash is built one way
+    ## If the XML contains more than one tag, the hash is created a different way
+    ##
+    ## So we force the hash to created consistently by inserting dummy tags so there is at least two of each tag type
+
     $action_count = 0;
     while ($_xml =~ /<action/g) {  #count actions based on '<action' tag
         $action_count++;
     }
 
-#    if ($action_count == 1) {
-#        $_xml =~ s/<\/testcases>/<case id="99999999" description1="dummy test case"\/><\/testcases>/;  #add dummy test case to end of file
-#    }
+    $goal_count = 0;
+    while ($_xml =~ /<goal/g) {  #count goals based on '<goal' tag
+        $goal_count++;
+    }
+
+    $fail_count = 0;
+    while ($_xml =~ /<fail/g) {  #count fail conditions based on '<fail' tag
+        $fail_count++;
+    }
+
+    if ($action_count == 1) {
+        $_xml =~ s{</testcases>}{<action id="99999999" description1="dummy action"/></testcases>};  #add dummy action to end of file
+    }
+
+    if ($goal_count == 1) {
+        $_xml =~ s{</testcases>}{<goal id="99999999" description1="dummy goal"/></testcases>};  #add goal action to end of file
+    }
+
+    if ($fail_count == 1) {
+        $_xml =~ s{</testcases>}{<fail id="99999999" description1="dummy fail condition"/></testcases>};  #add dummy fail condition to end of file
+    }
 
     # see the final test case file after all alerations for debug purposes
     #write_file('final_test_case_file_'.int(rand(999)).'.xml', $_xml);

@@ -1,0 +1,27 @@
+<testcases repeat="1">
+
+<action
+    section="Search for Automation Engineer Jobs in London"
+    id="1"
+    description1="Get Totaljobs Home Page"
+    method="selenium"
+    command='$selresp = $driver->get("http://www.totaljobs.com");'
+/>
+
+<goal
+    id="1"
+    name="HOME_PAGE_DISPLAYED"
+    description1="Check that the home page is displayed AOK"
+    verifytext="get_body_text|get_current_url"
+    verifypositive1="Find your perfect job"
+/>
+
+<fail
+    id="1"
+    description1="Should not show error page"
+    verifytext="get_body_text|get_current_url"
+    verifypositive1="Looks like we have a problem"
+    verifypositive2="Error.aspx"
+/>
+
+</testcases>
