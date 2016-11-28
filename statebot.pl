@@ -252,6 +252,38 @@ exit $status;
 ## - number of times a goal has been met is available as a substitution variable
 ## - number of times a fail condition has been reached is available as a substitution variable
 ## - number of times an action has been executed is available as a substitution variable
+## - have multiple steps per action, this could be done as follows
+##   
+my $_many_steps_per_action_example = q`
+<action
+    id="30"
+    description1="Search Jobs workflow"
+    verifytext="get_body_text|get_current_url|value:keywords"
+    verifypositive1="Automation Engineer"
+    verifypositive2="www.totaljobs.com/</get_current_url"
+/>
+
+<step
+    action="30"
+    id="10"
+    description1="Click Search button on Homepage"
+    method="selenium"
+    command1="$selresp = $driver->find_element('search-button','id')->click();"
+    verifytext="get_body_text"
+    verifypositive1="Sorry! We have found more than one match for your location"
+/>
+
+<step
+    action="30"
+    id="20"
+    description1="Click on London, South East then click Select button"
+    method="selenium"
+    verifytext="get_body_text|get_current_url"
+    command1="$selresp = helper_select_by_text('lstLocationList','id','London, South East');"        
+    command2="$selresp = $driver->find_element('btnLocationListSearch','id')->click();"
+    verifypositive1="Your job search results"
+/>
+`;
 
 #------------------------------------------------------------------
 #  SUBROUTINES
