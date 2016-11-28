@@ -12,7 +12,7 @@
     id="20"
     description1="Type in search keywords and location"
     verifytext="get_body_text|value:keywords"
-    verifypositive="Find your perfect job"
+    verifypositive="Search for and be recommended"
     verifynegative="Automation Engineer"
     method="selenium"
     command1="$selresp = helper_clear_and_send_keys('keywords','id','Automation Engineer');"
@@ -34,7 +34,7 @@
     description1="Click on London, South East then click Select button"
     verifytext="get_body_text|get_current_url"
     verifypositive1="Sorry! We have found more than one match for your location"
-    verifypositive2="<get_current_url1>http://www.totaljobs.com/JobSearch/LocationSelect.aspx"
+    verifypositive2="<get_current_url1>https://www.totaljobs.com/JobSearch/LocationSelect.aspx"
     method="selenium"
     command1="$selresp = helper_select_by_text('lstLocationList','id','London, South East');"        
     command2="$selresp = $driver->find_element('btnLocationListSearch','id')->click();"
@@ -45,7 +45,7 @@
     description1="Search Results page displayed"
     verifytext="get_body_text|get_current_url"
     verifypositive1="Automation Engineer jobs in London"
-    verifypositive2="<get_current_url1>http://www.totaljobs.com/jobs/automation-engineer/in-london_south-east"
+    verifypositive2="<get_current_url1>https://www.totaljobs.com/jobs/automation-engineer/in-london_south-east"
 />
 
 <fail

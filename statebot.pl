@@ -3465,13 +3465,13 @@ Usage: statebot.pl testcase_file <<options>>
 -p|--port selenium_port                             -p 8325
 -x|--proxy proxy_server                             -x localhost:9222
 -d|--driver chrome/chromedriver                     -d chrome
--y|--binary (if chromedriver option chosen)         -y C:\selenium-server\chromedriver.exe
+-y|--binary (if chromedriver option chosen)         -y C:\selenium\chromedriver.exe
 -i|--ignoreretry                                    -i
 -n|--no-output                                      -n
 -e|--verbose                                        -e
 -u|--publish-to                                     -u C:\inetpub\wwwroot\this_run_home
 
-statebot.pl examples/search.xml --driver chromedriver --binary C:\selenium-server\chromedriver.exe
+statebot.pl examples/search.xml --driver chromedriver --binary C:\selenium\chromedriver.exe
 
 or
 
